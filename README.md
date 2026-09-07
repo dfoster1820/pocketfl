@@ -54,22 +54,32 @@ icon.
 - **Playoffs** — a real NFL-style 7-seed bracket per conference: 4 division
   winners + 3 wildcards, the #1 seed gets a bye, then Wildcard → Divisional
   (with reseeding) → Conference Championship → Champions Bowl.
-- **Front office staff** — a head coach, chief scout, and head physio, each
-  with two star ratings (1-5) that actually affect the sim: coaching speeds
-  up player development and gives a small in-game edge; scouting narrows
-  your draft-day scouting ranges (and can flag a "scouts love him" gem);
-  medical staff lowers injury frequency and speeds recovery. Reroll any
-  role's candidates from Office → Staff, or edit a hire's name/stats
-  directly from the same screen.
+- **Front office staff** — a head coach (8 abilities: Player Development,
+  Gameday, Offense/Defense Scheme, Motivation, Discipline, Playcalling,
+  Adaptability), a chief scout (6: Evaluator, Star Spotter, Regional
+  Connections, Film Study, Medical Red Flags, Interview Process), and a
+  head physio (6: Prevention, Rehabilitation, Load Management, Nutrition
+  Program, Return Timeline Accuracy, Sports Science IQ). The original two
+  stats per role (Player Development/Gameday, Evaluator/Star Spotter,
+  Prevention/Rehabilitation) are the ones that actually drive the
+  simulation — development speed, a small in-game edge, draft scouting
+  accuracy, and injury frequency/recovery; the rest add real
+  characterization depth. Reroll any role's candidates from Office →
+  Staff, or edit a hire's name/stats directly from the same screen.
 - **Full editing tools** (Settings → Edit Players / Edit Staff, or the Edit
   button on any roster) — a six-tab player profile:
   - **Personal** — name, college (fictional), archetype, jersey number,
     age, morale, and (read-only) draft season/pick, or "UDFA" if undrafted.
   - **Skills** — Overall and Potential (the two numbers that actually drive
     the simulation), physical attributes (Height/Weight/Speed/Strength/
-    Agility) and mental attributes (Intelligence/Vision/Decisions/
-    Discipline) as descriptive stats, and **Injury Prone** (1-5), which
-    *does* affect how often that specific player gets hurt.
+    Agility), mental attributes (Intelligence/Vision/Decisions/
+    Discipline), and **10 position-specific technical skills** — a QB gets
+    Short/Medium/Deep Pass, Throw on Run, Pocket Presence, etc.; a corner
+    gets Man/Zone Coverage, Press, Ball Skills, Jamming, etc.; every one of
+    the 10 positions has its own relevant set. That's 20 skills per player
+    in total. **Injury Prone** (1-5) is the one sub-attribute that actually
+    affects how often that specific player gets hurt; the rest are
+    descriptive depth for now (see note in the app itself).
   - **Develop** — a season-by-season rating progression chart, an
     "Estimated Potential" scouting label (e.g. "Generational Talent"),
     editable development factors (Coaching/Team Mentors/Personality), and

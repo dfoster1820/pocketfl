@@ -471,6 +471,18 @@ const ARCHETYPES = {
 };
 const CHARACTER_LEVELS = ["Low", "Med", "High"];
 const MORALE_LEVELS = ["Unhappy", "Content", "Happy", "Thrilled"];
+const TECHNICAL_SKILLS = {
+  QB: ["Short Pass", "Medium Pass", "Deep Pass", "Throw on Run", "Ball Security", "Pocket Presence", "Play Action", "Scrambling", "Touch & Timing", "Progression Speed"],
+  RB: ["Ball Security", "Contact Balance", "Elusiveness", "Trucking Power", "Pass Blocking", "Receiving", "Route Running", "Stiff Arm", "Change of Direction", "Hole Reading"],
+  WR: ["Route Running", "Catching", "Contested Catch", "Release vs Press", "Yards After Catch", "Blocking", "Deep Threat", "Short Routes", "Body Control", "Hands"],
+  TE: ["Route Running", "Catching", "Run Blocking", "Pass Blocking", "Yards After Catch", "Contested Catch", "Blocking Technique", "Hands", "In-Line Strength", "Seam Threat"],
+  OL: ["Pass Blocking", "Run Blocking", "Pull Blocking", "Anchor", "Hand Technique", "Awareness", "Double Team", "Screen Blocking", "Snap Timing", "Footwork"],
+  DL: ["Pass Rush", "Run Stopping", "Hand Technique", "Motor", "Block Shedding", "Gap Discipline", "Get Off", "Bull Rush", "Finesse Moves", "Pursuit"],
+  LB: ["Run Stopping", "Man Coverage", "Zone Coverage", "Blitzing", "Tackling", "Read & React", "Block Shedding", "Sideline to Sideline", "Gap Control", "Play Recognition"],
+  CB: ["Man Coverage", "Zone Coverage", "Press Coverage", "Ball Skills", "Tackling", "Backpedal", "Recovery Speed", "Route Recognition", "Jamming", "Long Speed"],
+  S: ["Zone Coverage", "Man Coverage", "Run Support", "Tackling", "Ball Skills", "Range", "Box Presence", "Deep Coverage", "Play Recognition", "Communication"],
+  K: ["Accuracy", "Leg Strength", "Clutch Kicking", "Kickoff Power", "Consistency", "Onside Kicks", "Wind Management", "Hang Time", "Field Goal Range", "Composure"],
+};
 
 /* ------------------------------ Utilities -------------------------------- */
 
@@ -613,6 +625,16 @@ function migrateSettings(s) {
     if (!p.awards) p.awards = { rings: 0, poty: 0, allPro: 0, confBowlApps: 0 };
     if (!p.injuryHistory) p.injuryHistory = [];
     if (!p.gameLog) p.gameLog = [];
+    if (!p.technical) {
+      p.technical = {};
+      (TECHNICAL_SKILLS[p.pos] || []).forEach(skill => { p.technical[skill] = clamp((p.ovr || 60) + randInt(-10, 10), 40, 99); });
+    }
+  });
+  (s.teams || []).forEach(t => {
+    ["coach", "scout", "physio"].forEach(role => {
+      if (!t.staff || !t.staff[role]) return;
+      STAFF_STATS[role].forEach(([key]) => { if (t.staff[role][key] === undefined) t.staff[role][key] = randInt(1, 5); });
+    });
   });
   return s;
 }
@@ -734,6 +756,7 @@ function makePlayer(pos, opts = {}) {
       personality: choice(CHARACTER_LEVELS), workEthic: choice(CHARACTER_LEVELS),
     },
     devFactors: { coaching: randInt(1, 5), teamMentors: randInt(1, 5), personality: randInt(1, 5) },
+    technical: Object.fromEntries((TECHNICAL_SKILLS[pos] || []).map(skill => [skill, clamp(ovr + randInt(-10, 10), 40, 99)])),
     awards: { rings: 0, poty: 0, allPro: 0, confBowlApps: 0 },
     injuryHistory: [],
     gameLog: [],
@@ -756,10 +779,25 @@ function buildRoster(teamId) {
   return ids;
 }
 
+const COACH_STATS = [
+  ["dev", "Player Development"], ["gameday", "Gameday"], ["offenseScheme", "Offense Scheme"],
+  ["defenseScheme", "Defense Scheme"], ["motivation", "Motivation"], ["discipline", "Discipline"],
+  ["playcalling", "Playcalling"], ["adaptability", "Adaptability"],
+];
+const SCOUT_STATS = [
+  ["evaluator", "Evaluator"], ["starSpotter", "Star Spotter"], ["regionalConnections", "Regional Connections"],
+  ["filmStudy", "Film Study"], ["medicalRedFlags", "Medical Red Flags"], ["interviewProcess", "Interview Process"],
+];
+const PHYSIO_STATS = [
+  ["prevention", "Prevention"], ["rehab", "Rehabilitation"], ["loadManagement", "Load Management"],
+  ["nutritionProgram", "Nutrition Program"], ["returnTimelineAccuracy", "Return Timeline Accuracy"], ["sportsScienceIq", "Sports Science IQ"],
+];
+const STAFF_STATS = { coach: COACH_STATS, scout: SCOUT_STATS, physio: PHYSIO_STATS };
+
 function randStaffStats(role) {
-  if (role === "coach") return { dev: randInt(1, 5), gameday: randInt(1, 5) };
-  if (role === "scout") return { evaluator: randInt(1, 5), starSpotter: randInt(1, 5) };
-  return { prevention: randInt(1, 5), rehab: randInt(1, 5) }; // physio
+  const out = {};
+  STAFF_STATS[role].forEach(([key]) => { out[key] = randInt(1, 5); });
+  return out;
 }
 function makeStaff() {
   return {
@@ -775,7 +813,8 @@ function generateStaffCandidates(role, n = 3) {
 }
 function staffCost(member) {
   const vals = Object.entries(member).filter(([k]) => k !== "name").map(([, v]) => v);
-  return Math.round(vals.reduce((a, b) => a + b, 0) * 1.3 * 10) / 10;
+  const avg = vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+  return Math.round(avg * 1.3 * 10) / 10;
 }
 function teamStaffCost(team) { return staffCost(team.staff.coach) + staffCost(team.staff.scout) + staffCost(team.staff.physio); }
 
@@ -1671,9 +1710,9 @@ function renderOfficeStaff(root) {
   const team = teamById(S.userTeamId);
   root.appendChild(el("p", { class: "section-sub" }, `Staff budget: $${(S.settings.staffCapLimit - teamStaffCost(team)).toFixed(1)}M left of $${S.settings.staffCapLimit}M${S.settings.staffCapOn ? "" : " (off)"}`));
   const roles = [
-    ["coach", "Head Coach", [["dev", "Player Development"], ["gameday", "Gameday"]]],
-    ["scout", "Chief Scout", [["evaluator", "Evaluator"], ["starSpotter", "Star Spotter"]]],
-    ["physio", "Head Physio", [["prevention", "Prevention"], ["rehab", "Rehabilitation"]]],
+    ["coach", "Head Coach", COACH_STATS],
+    ["scout", "Chief Scout", SCOUT_STATS],
+    ["physio", "Head Physio", PHYSIO_STATS],
   ];
   roles.forEach(([role, label, stats]) => {
     const s = team.staff[role];
@@ -1693,9 +1732,7 @@ function renderOfficeStaff(root) {
 }
 function showHireModal(role, label) {
   const candidates = generateStaffCandidates(role, 3);
-  const statKeys = role === "coach" ? [["dev", "Player Development"], ["gameday", "Gameday"]]
-    : role === "scout" ? [["evaluator", "Evaluator"], ["starSpotter", "Star Spotter"]]
-    : [["prevention", "Prevention"], ["rehab", "Rehabilitation"]];
+  const statKeys = STAFF_STATS[role];
   const node = el("div");
   node.appendChild(el("h2", { class: "section-title" }, `${label} Candidates`));
   node.appendChild(el("p", { class: "section-sub" }, "Pick one to hire — this replaces your current hire immediately."));
@@ -1721,7 +1758,7 @@ function showEditStaffModal(team, role, label, statDefs) {
   node.appendChild(el("p", { class: "section-sub" }, teamName(team.id)));
   const form = el("div", { class: "form-grid" });
   form.appendChild(field("Name", textInput(draft.name, v => draft.name = v)));
-  statDefs.forEach(([key, l]) => form.appendChild(field(l + " (1-5)", numInput(draft[key], v => draft[key] = clamp(Math.round(v), 1, 5), { min: 1, max: 5, step: 1 }))));
+  statDefs.forEach(([key, l]) => form.appendChild(field(l + " (1-5)", numInputWithBounds(draft[key], v => draft[key] = clamp(Math.round(v), 1, 5), { min: 1, max: 5, step: 1 }))));
   node.appendChild(form);
   node.appendChild(el("div", { class: "row-gap", style: "margin-top:14px" }, [
     el("button", { class: "btn btn-primary", onclick: () => { editStaffDirect(team, role, draft); closeModal(); renderView(activeView); } }, "Save"),
@@ -1822,6 +1859,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
     mental: { ...p.mental },
     character: { ...p.character },
     devFactors: { ...p.devFactors },
+    technical: { ...p.technical },
     tradeBlock: p.tradeBlock,
     salary: p.salary, bonus: p.bonus, contractYears: p.contractYears, weightContract: p.weightContract,
     scoutLow: p._scoutLow, scoutHigh: p._scoutHigh,
@@ -1861,7 +1899,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
     form.appendChild(field("First Name", textInput(draft.firstName, v => draft.firstName = v)));
     form.appendChild(field("Last Name", textInput(draft.lastName, v => draft.lastName = v)));
     form.appendChild(field("College", textInput(draft.college, v => draft.college = v)));
-    form.appendChild(field("Position", selectInput(POSITIONS, draft.pos, v => draft.pos = v)));
+    form.appendChild(field("Position", selectInput(POSITIONS, draft.pos, v => { draft.pos = v; renderBody(); })));
     form.appendChild(field("Archetype", textInput(draft.archetype, v => draft.archetype = v)));
     form.appendChild(field("Jersey Number", numInput(draft.jerseyNumber, v => draft.jerseyNumber = clamp(Math.round(v), 0, 99), { min: 0, max: 99 })));
     form.appendChild(field("Age", numInput(draft.age, v => draft.age = Math.round(v), { min: 18, max: 45 })));
@@ -1893,6 +1931,17 @@ function showEditPlayerModal(p, onSave, opts = {}) {
       mform.appendChild(field(l, numInputWithBounds(draft.mental[k], v => draft.mental[k] = clamp(Math.round(v), 40, 99), { min: 40, max: 99 })));
     });
     wrap.appendChild(mform);
+
+    const techSkills = TECHNICAL_SKILLS[draft.pos] || [];
+    if (techSkills.length) {
+      wrap.appendChild(el("p", { class: "field-label", style: "margin:16px 0 6px" }, `Technical (${draft.pos})`));
+      const tform = el("div", { class: "form-grid" });
+      techSkills.forEach(skill => {
+        if (draft.technical[skill] === undefined) draft.technical[skill] = clamp(draft.ovr, 40, 99);
+        tform.appendChild(field(skill, numInputWithBounds(draft.technical[skill], v => draft.technical[skill] = clamp(Math.round(v), 40, 99), { min: 40, max: 99 })));
+      });
+      wrap.appendChild(tform);
+    }
     wrap.appendChild(el("p", { class: "muted", style: "margin-top:12px" }, "Overall and Potential drive the simulation directly. Everything else on this tab is descriptive for now — except Injury Prone, which does affect how often this player gets hurt."));
     return wrap;
   }
@@ -2064,7 +2113,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
         archetype: draft.archetype, morale: draft.morale,
         ovr: draft.ovr, pot: draft.pot, heightIn: draft.heightIn, weightLb: draft.weightLb,
         speed: draft.speed, strength: draft.strength, agility: draft.agility, injuryProne: draft.injuryProne,
-        mental: draft.mental,
+        mental: draft.mental, technical: draft.technical,
       });
       if (isProspect) { p._scoutLow = draft.scoutLow; p._scoutHigh = draft.scoutHigh; }
       else {
@@ -2546,9 +2595,9 @@ function renderEditStaffScreen(root) {
 
   const team = teamById(editStaffTeamId);
   const roles = [
-    ["coach", "Head Coach", [["dev", "Player Development"], ["gameday", "Gameday"]]],
-    ["scout", "Chief Scout", [["evaluator", "Evaluator"], ["starSpotter", "Star Spotter"]]],
-    ["physio", "Head Physio", [["prevention", "Prevention"], ["rehab", "Rehabilitation"]]],
+    ["coach", "Head Coach", COACH_STATS],
+    ["scout", "Chief Scout", SCOUT_STATS],
+    ["physio", "Head Physio", PHYSIO_STATS],
   ];
   roles.forEach(([role, label, stats]) => {
     const s = team.staff[role];

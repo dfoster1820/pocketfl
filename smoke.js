@@ -112,7 +112,7 @@ log("Weekly standouts computation OK (offense/defense best performer tracked per
   skillsChip.click();
   const modalBody = document.querySelector("#modal-body");
   const minMaxButtons = [...modalBody.querySelectorAll("button")].filter(b => b.textContent === "Min" || b.textContent === "Max");
-  check(minMaxButtons.length === 16, "expected 16 Min/Max buttons on the Skills tab (8 fields x 2), got " + minMaxButtons.length);
+  check(minMaxButtons.length === 44, "expected 44 Min/Max buttons on the Skills tab (22 fields x 2), got " + minMaxButtons.length);
   const speedField = [...modalBody.querySelectorAll(".field")].find(f => f.textContent.includes("Speed"));
   speedField.querySelector("button:last-of-type") && [...speedField.querySelectorAll("button")].find(b => b.textContent === "Max").click();
   check(speedField.querySelector("input").value === "99", "Max button should set Speed to 99");
@@ -124,6 +124,62 @@ log("Weekly standouts computation OK (offense/defense best performer tracked per
   check(S.players[domTestPlayer.id].speed === 99, "Speed Max should persist after Save");
   check(S.players[domTestPlayer.id].injuryProne === 1, "Injury Prone Min should persist after Save");
   log("Skills tab Min/Max quick-set buttons OK (present, functional, and persist on save).");
+}
+
+/* ---------- 2e. Full 6-tab player profile (Personal/Skills/Develop/Contract/Games/Career) ---------- */
+{
+  if (getState().phase === "regular") window.simulateWeek(); // best-effort, only if the season's already running
+  const profilePlayer = S.players[myTeam.players[1]];
+  window.showEditPlayerModal(profilePlayer, () => {}, {});
+  const modalBody = document.querySelector("#modal-body");
+  ["Personal", "Skills", "Develop", "Contract", "Games", "Career"].forEach(tabName => {
+    const chip = [...modalBody.querySelectorAll(".chip")].find(b => b.textContent === tabName);
+    check(!!chip, `${tabName} tab should exist in the player profile`);
+    if (!chip) return;
+    chip.click();
+    check(modalBody.textContent.trim().length > 0, `${tabName} tab should render content`);
+  });
+  [...modalBody.querySelectorAll(".chip")].find(b => b.textContent === "Career").click();
+  check(modalBody.textContent.includes("Rings") && modalBody.textContent.includes("Hall of Fame Progress"), "Career tab should show awards and HOF progress");
+  [...modalBody.querySelectorAll(".chip")].find(b => b.textContent === "Develop").click();
+  check(modalBody.textContent.includes("Rating Progression") && modalBody.textContent.includes("Injury History"), "Develop tab should show progression and injury history");
+  const saveBtn = [...document.querySelector("#modal").querySelectorAll("button")].find(b => b.textContent === "Save Changes");
+  saveBtn.click();
+  log("Full 6-tab player profile OK (Personal/Skills/Develop/Contract/Games/Career all render and save).");
+}
+
+/* ---------- 2f. Technical skills (position-specific) + expanded coaching abilities ---------- */
+{
+  const cbId = myTeam.players.find(id => S.players[id].pos === "CB");
+  if (cbId) {
+    const cbPlayer = S.players[cbId];
+    check(Object.keys(cbPlayer.technical).length === 10, "CB should have 10 technical skills, got " + Object.keys(cbPlayer.technical).length);
+    check("Man Coverage" in cbPlayer.technical && "Jamming" in cbPlayer.technical, "CB technical skills should include position-relevant skills like Man Coverage/Jamming");
+    window.showEditPlayerModal(cbPlayer, () => {}, {});
+    const mb = document.querySelector("#modal-body");
+    [...mb.querySelectorAll(".chip")].find(b => b.textContent === "Skills").click();
+    check(mb.textContent.includes("Man Coverage") && mb.textContent.includes("Jamming"), "Skills tab should render this CB's technical skill names");
+  }
+  const qbId = myTeam.players.find(id => S.players[id].pos === "QB");
+  if (qbId) check(Object.keys(S.players[qbId].technical).length === 10, "QB should have 10 technical skills");
+
+  check(Object.keys(myTeam.staff.coach).filter(k => k !== "name").length === 8, "coach should have 8 abilities");
+  check(Object.keys(myTeam.staff.scout).filter(k => k !== "name").length === 6, "scout should have 6 abilities");
+  check(Object.keys(myTeam.staff.physio).filter(k => k !== "name").length === 6, "physio should have 6 abilities");
+  const capCost = window.teamStaffCost(myTeam);
+  check(capCost > 0 && capCost < 30, `staff cost should stay in a sane range with more stats, got ${capCost.toFixed(1)}`);
+  log(`Technical skills (10/position) + expanded coaching abilities OK. Team staff cost: $${capCost.toFixed(1)}M.`);
+
+  // Migration: an old-format save missing the new fields should backfill cleanly
+  const oldSave = JSON.parse(JSON.stringify(S));
+  delete oldSave.players[Object.keys(oldSave.players)[0]].technical;
+  oldSave.teams.forEach(t => { delete t.staff.coach.offenseScheme; delete t.staff.scout.filmStudy; delete t.staff.physio.loadManagement; });
+  const migrated = window.migrateSettings(oldSave);
+  check(!!Object.values(migrated.players)[0].technical, "migration should backfill missing player.technical");
+  check(migrated.teams[0].staff.coach.offenseScheme !== undefined, "migration should backfill missing coach ability");
+  check(migrated.teams[0].staff.scout.filmStudy !== undefined, "migration should backfill missing scout ability");
+  check(migrated.teams[0].staff.physio.loadManagement !== undefined, "migration should backfill missing physio ability");
+  log("Migration backfill for technical skills + expanded coaching abilities OK.");
 }
 
 /* ---------- 3. Dual salary caps ---------- */
@@ -243,7 +299,16 @@ const migrated = window.migrateSettings(JSON.parse(raw));
 check(migrated.settings.playerCapLimit !== undefined, "migration should ensure new settings fields exist");
 log("Save/load + migration OK.");
 
-/* ---------- 10. Render every view/sub-tab (including new ones) ---------- */
+/* ---------- 9b. Save size stays within real browser localStorage quotas ---------- */
+{
+  const sizeBytes = JSON.stringify(S).length;
+  check(sizeBytes < 4_000_000, `save size should stay well under the ~5MB localStorage quota, got ${(sizeBytes / 1e6).toFixed(2)}MB`);
+  const rawCheck = window.localStorage.getItem("gridiron_office_save_v4");
+  check(rawCheck && rawCheck.length === JSON.stringify(S).length, "localStorage should actually contain the full current save, not a silently-failed write");
+  log(`Save size OK: ${(sizeBytes / 1e6).toFixed(2)}MB after ${S.season} season(s) — comfortably under quota.`);
+}
+
+
 window.enterMainApp();
 ["office", "team", "league", "news", "settings"].forEach(v => {
   window.setActiveView(v);
