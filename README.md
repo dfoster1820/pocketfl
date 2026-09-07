@@ -62,21 +62,32 @@ icon.
   role's candidates from Office → Staff, or edit a hire's name/stats
   directly from the same screen.
 - **Full editing tools** (Settings → Edit Players / Edit Staff, or the Edit
-  button on any roster) — a three-tab player editor:
-  - **Personal** — name, college (fictional), jersey number, age, position,
-    and (read-only) draft season/pick, or "UDFA" if undrafted.
+  button on any roster) — a six-tab player profile:
+  - **Personal** — name, college (fictional), archetype, jersey number,
+    age, morale, and (read-only) draft season/pick, or "UDFA" if undrafted.
   - **Skills** — Overall and Potential (the two numbers that actually drive
-    the simulation), plus Height/Weight/Speed/Strength/Agility as
-    descriptive attributes, and **Injury Prone** (1-5), which *does* affect
-    how often that specific player gets hurt on top of your team's medical
-    staff.
-  - **Contract** (or **Scouting** for a college prospect) — average
-    salary, a signing bonus, contract length, and a Front/Balanced/Back
-    "contract shape" that reshapes the year-by-year cap hit table below it
-    (front-loaded pays more early, back-loaded more later). **There's no
-    separate "Cut" button on the roster anymore — releasing a player is a
-    contract decision, done from the "Cut Player" button right here.**
-  Pick any of the 32 teams and edit any player, coach/scout/physio, or the
+    the simulation), physical attributes (Height/Weight/Speed/Strength/
+    Agility) and mental attributes (Intelligence/Vision/Decisions/
+    Discipline) as descriptive stats, and **Injury Prone** (1-5), which
+    *does* affect how often that specific player gets hurt.
+  - **Develop** — a season-by-season rating progression chart, an
+    "Estimated Potential" scouting label (e.g. "Generational Talent"),
+    editable development factors (Coaching/Team Mentors/Personality), and
+    a full injury history log.
+  - **Contract** (or **Scouting** for a college prospect) — character
+    traits (Greed/Loyalty/Ambition/Personality/Work Ethic), average
+    salary, a signing bonus, contract length, a Front/Balanced/Back
+    contract shape that reshapes the year-by-year cap hit table, a trade
+    block toggle, and **Cut Player** — there's no separate roster "Cut"
+    button anymore; releasing a player is a contract decision made here.
+  - **Games** — a real per-game log (This Season / Career) with actual
+    box-score lines for every game, tracked for your own roster (kept off
+    for the other 31 teams to keep save files a reasonable size — their
+    season and career totals are still tracked normally).
+  - **Career** — Rings, Player of the Year awards, All-Pro selections, and
+    Conference Bowl appearances (all computed automatically each season),
+    full career stats, draft info, and a Hall of Fame progress bar.
+  Pick any of the 32 teams and open any player, coach/scout/physio, or the
   current draft class. Editing bypasses normal caps and limits on purpose —
   it's a sandbox tool, not a transaction.
 - **Injuries** — a lightweight system tied to your Settings and physio

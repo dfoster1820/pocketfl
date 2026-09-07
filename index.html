@@ -457,6 +457,20 @@ const COLLEGES = ["Redrock A&M", "Cascade State", "Ironwood University", "Bay Cr
   "Highland Poly", "Millstone University", "Granite Valley State", "Thornfield College", "Emberline University",
   "Copper Ridge State", "Duskrow Tech", "Silverlake University", "Ashcombe College", "Windrift State",
   "Cinderpass University", "Sundale A&M", "Redstone College", "Kingsmere University", "Vantage State"];
+const ARCHETYPES = {
+  QB: ["Gunslinger", "Game Manager", "Mobile", "Field General", "Dual Threat"],
+  RB: ["Workhorse", "Speedster", "Power Back", "Receiving Back", "Bruiser"],
+  WR: ["Deep Threat", "Possession", "Slot Specialist", "Route Technician", "Playmaker"],
+  TE: ["Receiving Threat", "Blocking Specialist", "Move TE", "Hybrid"],
+  OL: ["Pass Protector", "Road Grader", "Technician", "Anchor"],
+  DL: ["Pass Rusher", "Run Stuffer", "Motor Guy", "Disruptor"],
+  LB: ["Sideline to Sideline", "Thumper", "Coverage LB", "Blitzer"],
+  CB: ["Shutdown", "Zone Specialist", "Ball Hawk", "Press Corner"],
+  S: ["Ball Hawk", "Enforcer", "Coverage Safety", "Box Safety"],
+  K: ["Dead Eye", "Big Leg", "Clutch", "Accurate"],
+};
+const CHARACTER_LEVELS = ["Low", "Med", "High"];
+const MORALE_LEVELS = ["Unhappy", "Content", "Happy", "Thrilled"];
 
 /* ------------------------------ Utilities -------------------------------- */
 
@@ -590,6 +604,15 @@ function migrateSettings(s) {
     if (p.injuryProne === undefined) p.injuryProne = 3;
     if (p.draftSeason === undefined) p.draftSeason = null;
     if (p.draftPick === undefined) p.draftPick = null;
+    if (p.archetype === undefined) p.archetype = choice(ARCHETYPES[p.pos] || ["Standard"]);
+    if (p.morale === undefined) p.morale = "Content";
+    if (p.tradeBlock === undefined) p.tradeBlock = false;
+    if (!p.mental) p.mental = { intelligence: p.ovr || 60, vision: p.ovr || 60, decisions: p.ovr || 60, discipline: p.ovr || 60 };
+    if (!p.character) p.character = { greed: "Med", loyalty: "Med", ambition: "Med", personality: "Med", workEthic: "Med" };
+    if (!p.devFactors) p.devFactors = { coaching: 3, teamMentors: 3, personality: 3 };
+    if (!p.awards) p.awards = { rings: 0, poty: 0, allPro: 0, confBowlApps: 0 };
+    if (!p.injuryHistory) p.injuryHistory = [];
+    if (!p.gameLog) p.gameLog = [];
   });
   return s;
 }
@@ -681,12 +704,15 @@ function makePlayer(pos, opts = {}) {
   const id = uid("p");
   return {
     id, name: fullName(), pos, age, ovr, pot,
+    archetype: choice(ARCHETYPES[pos] || ["Standard"]),
+    morale: "Content",
     teamId: opts.teamId ?? null,
     contractYears: opts.contractYears ?? randInt(1, 4),
     salary: salaryFor(ovr),
     salaryOverride: false,
     bonus: opts.bonus ?? 0,
     weightContract: "Balanced",
+    tradeBlock: false,
     college: opts.college ?? choice(COLLEGES),
     jerseyNumber: opts.jerseyNumber ?? randInt(1, 99),
     draftSeason: opts.draftSeason ?? null,
@@ -697,6 +723,20 @@ function makePlayer(pos, opts = {}) {
     strength: clamp(ovr + randInt(-8, 8), 40, 99),
     agility: clamp(ovr + randInt(-8, 8), 40, 99),
     injuryProne: randInt(1, 5),
+    mental: {
+      intelligence: clamp(ovr + randInt(-10, 10), 40, 99),
+      vision: clamp(ovr + randInt(-10, 10), 40, 99),
+      decisions: clamp(ovr + randInt(-10, 10), 40, 99),
+      discipline: clamp(ovr + randInt(-10, 10), 40, 99),
+    },
+    character: {
+      greed: choice(CHARACTER_LEVELS), loyalty: choice(CHARACTER_LEVELS), ambition: choice(CHARACTER_LEVELS),
+      personality: choice(CHARACTER_LEVELS), workEthic: choice(CHARACTER_LEVELS),
+    },
+    devFactors: { coaching: randInt(1, 5), teamMentors: randInt(1, 5), personality: randInt(1, 5) },
+    awards: { rings: 0, poty: 0, allPro: 0, confBowlApps: 0 },
+    injuryHistory: [],
+    gameLog: [],
     stats: freshStats(), career: freshStats(), seasonLog: [],
     injuredWeeksLeft: 0,
     retired: false,
@@ -1038,6 +1078,8 @@ function simulateGame(homeTeam, awayTeam) {
       if (chance > 0 && Math.random() < chance) {
         const duration = Math.max(1, randInt(1, 4) - Math.floor(team.staff.physio.rehab / 2));
         p.injuredWeeksLeft = duration;
+        p.injuryHistory.push({ season: S.season, week: S.week, weeksOut: duration });
+        if (p.injuryHistory.length > 30) p.injuryHistory.shift();
         if (team.id === S.userTeamId) addLog(`${p.name} injured — out ${duration} wk${duration > 1 ? "s" : ""}.`);
       }
     });
@@ -1053,6 +1095,27 @@ function currentWeekGames() { const wk = S.schedule.find(w => w.week === S.week)
 
 function decrementInjuries() {
   Object.values(S.players).forEach(p => { if (p.injuredWeeksLeft > 0) p.injuredWeeksLeft -= 1; });
+}
+
+function statDelta(before, after) {
+  const out = freshStats();
+  for (const cat of Object.keys(after)) {
+    if (typeof after[cat] === "number") { out[cat] = after[cat] - (before[cat] || 0); continue; }
+    out[cat] = {};
+    for (const k of Object.keys(after[cat])) {
+      if (k === "long") out[cat][k] = after[cat][k] > (before[cat][k] || 0) ? after[cat][k] : 0;
+      else out[cat][k] = (after[cat][k] || 0) - (before[cat][k] || 0);
+    }
+  }
+  return out;
+}
+function logGameStats(team, oppId, isHome, before) {
+  if (team.id !== S.userTeamId) return; // keep save size sane — CPU rosters still get season/career aggregates
+  team.players.forEach(pid => {
+    const p = S.players[pid]; const b = before[pid]; if (!b) return;
+    p.gameLog.push({ season: S.season, week: S.week, opp: oppId, home: isHome, stats: statDelta(b, p.stats) });
+    if (p.gameLog.length > 40) p.gameLog.shift();
+  });
 }
 
 function simulateWeek() {
@@ -1074,6 +1137,8 @@ function simulateWeek() {
     if (r.homeScore > r.awayScore) { home.wins++; away.losses++; }
     else if (r.awayScore > r.homeScore) { away.wins++; home.losses++; }
     else { home.ties++; away.ties++; }
+    logGameStats(home, away.id, true, before);
+    logGameStats(away, home.id, false, before);
     results.push(g);
   }
   S.lastWeekAwards = computeWeeklyAwards(games, before);
@@ -1179,6 +1244,9 @@ function simPlayoffRound() {
     const winner = resolveTie(g, c1, c2);
     po.championsBowl = { home: c1, away: c2, ...g, winner };
     S.history.push({ season: S.season, champion: winner });
+    teamById(c1).players.forEach(pid => { if (S.players[pid]) S.players[pid].awards.confBowlApps += 1; });
+    teamById(c2).players.forEach(pid => { if (S.players[pid]) S.players[pid].awards.confBowlApps += 1; });
+    teamById(winner).players.forEach(pid => { if (S.players[pid]) S.players[pid].awards.rings += 1; });
     addLog(`${teamName(winner)} win the Champions Bowl!`);
     S.phase = "champion";
   }
@@ -1210,7 +1278,23 @@ function checkHallOfFame(p) {
 
 /* ------------------------------ Offseason ------------------------------------ */
 
+const ALL_PRO_SLOTS = { QB: 1, RB: 2, WR: 3, TE: 1, DL: 2, LB: 2, CB: 2, S: 2, K: 1 };
+
+function computeSeasonAwards() {
+  const active = Object.values(S.players).filter(p => p.teamId && !p.retired && p.stats.gp > 0);
+  if (!active.length) return;
+  let potyWinner = null, potyScore = -Infinity;
+  active.forEach(p => { const s = careerScore(p.stats); if (s > potyScore) { potyScore = s; potyWinner = p; } });
+  if (potyWinner) { potyWinner.awards.poty += 1; addLog(`🏆 ${potyWinner.name} (${potyWinner.pos}) named Player of the Year.`); }
+
+  Object.entries(ALL_PRO_SLOTS).forEach(([pos, slots]) => {
+    active.filter(p => p.pos === pos).sort((a, b) => careerScore(b.stats) - careerScore(a.stats)).slice(0, slots)
+      .forEach(p => { p.awards.allPro += 1; });
+  });
+}
+
 function processOffseason() {
+  computeSeasonAwards();
   const newFAs = [];
   for (const t of S.teams) {
     S.teamSeasonHistory.push({ season: S.season, teamId: t.id, wins: t.wins, losses: t.losses, ties: t.ties, pf: t.pf, pa: t.pa });
@@ -1218,12 +1302,13 @@ function processOffseason() {
     const keep = [];
     for (const pid of t.players) {
       const p = S.players[pid];
-      p.seasonLog.push({ season: S.season, teamId: t.id, stats: JSON.parse(JSON.stringify(p.stats)) });
-      addStatsInto(p.career, p.stats);
+      const statsSnapshot = JSON.parse(JSON.stringify(p.stats));
       p.age += 1;
       if (p.age <= 29) p.ovr = Math.round(clamp(p.ovr + (p.pot - p.ovr) * rand(0.08, 0.25) * devMult + rand(-1, 2), 40, 99));
       else p.ovr = Math.round(clamp(p.ovr - rand(0.5, 3.5), 35, 99));
       if (!p.salaryOverride) p.salary = salaryFor(p.ovr);
+      p.seasonLog.push({ season: S.season, teamId: t.id, stats: statsSnapshot, ovr: p.ovr });
+      addStatsInto(p.career, statsSnapshot);
       p.stats = freshStats();
       p.injuredWeeksLeft = 0;
 
@@ -1716,50 +1801,81 @@ function renderRoster(root, teamId) {
   table.appendChild(tbody); panel.appendChild(table); root.appendChild(panel);
 }
 
+function potentialLabel(pot) {
+  if (pot >= 95) return "Generational Talent";
+  if (pot >= 88) return "Elite Potential";
+  if (pot >= 80) return "Pro Bowl Caliber";
+  if (pot >= 70) return "Solid Starter";
+  if (pot >= 60) return "Depth Piece";
+  return "Practice Squad";
+}
+
 function showEditPlayerModal(p, onSave, opts = {}) {
   const isProspect = !!opts.isProspect;
   const team = p.teamId ? teamById(p.teamId) : null;
   const nameParts = p.name.split(" ");
   const draft = {
     firstName: nameParts[0] || "", lastName: nameParts.slice(1).join(" ") || "",
-    college: p.college, jerseyNumber: p.jerseyNumber, age: p.age, pos: p.pos,
+    college: p.college, jerseyNumber: p.jerseyNumber, age: p.age, pos: p.pos, archetype: p.archetype, morale: p.morale,
     ovr: p.ovr, pot: p.pot, heightIn: p.heightIn, weightLb: p.weightLb,
     speed: p.speed, strength: p.strength, agility: p.agility, injuryProne: p.injuryProne,
+    mental: { ...p.mental },
+    character: { ...p.character },
+    devFactors: { ...p.devFactors },
+    tradeBlock: p.tradeBlock,
     salary: p.salary, bonus: p.bonus, contractYears: p.contractYears, weightContract: p.weightContract,
     scoutLow: p._scoutLow, scoutHigh: p._scoutHigh,
   };
   let tab = "personal";
   const node = el("div");
-  node.appendChild(el("h2", { class: "section-title" }, isProspect ? "Edit College Prospect" : "Edit Player"));
+  node.appendChild(el("h2", { class: "section-title" }, isProspect ? "Edit College Prospect" : p.name));
+
+  if (!isProspect) {
+    const growth = p.seasonLog.length ? p.ovr - (p.seasonLog[p.seasonLog.length - 1].ovr ?? p.ovr) : 0;
+    node.appendChild(el("div", { class: "stat-grid", style: "margin-bottom:14px" }, [
+      statBox(p.archetype, "Archetype"),
+      statBox(team ? teamName(team.id) : "Free Agent", "Team"),
+      statBox(p.morale, "Morale"),
+      statBox(`${p.ovr}${growth ? (growth > 0 ? ` (+${growth})` : ` (${growth})`) : ""}`, "Overall"),
+    ]));
+  }
+
   const tabsRow = el("div", { class: "chip-row" });
   const body = el("div");
+  const tabList = isProspect
+    ? [["personal", "Personal"], ["skills", "Skills"], ["contract", "Scouting"]]
+    : [["personal", "Personal"], ["skills", "Skills"], ["develop", "Develop"], ["contract", "Contract"], ["games", "Games"], ["career", "Career"]];
 
   function renderTabs() {
     tabsRow.innerHTML = "";
-    [["personal", "Personal"], ["skills", "Skills"], ["contract", isProspect ? "Scouting" : "Contract"]].forEach(([k, l]) => {
-      tabsRow.appendChild(el("button", { class: `chip ${tab === k ? "active" : ""}`, onclick: () => { tab = k; renderTabs(); renderBody(); } }, l));
-    });
+    tabList.forEach(([k, l]) => tabsRow.appendChild(el("button", { class: `chip ${tab === k ? "active" : ""}`, onclick: () => { tab = k; renderTabs(); renderBody(); } }, l)));
   }
   function renderBody() {
     body.innerHTML = "";
-    body.appendChild(tab === "personal" ? personalTab() : tab === "skills" ? skillsTab() : contractTab());
+    const fn = { personal: personalTab, skills: skillsTab, develop: developTab, contract: contractTab, games: gamesTab, career: careerTab }[tab];
+    body.appendChild(fn());
   }
+
   function personalTab() {
     const form = el("div", { class: "form-grid" });
     form.appendChild(field("First Name", textInput(draft.firstName, v => draft.firstName = v)));
     form.appendChild(field("Last Name", textInput(draft.lastName, v => draft.lastName = v)));
     form.appendChild(field("College", textInput(draft.college, v => draft.college = v)));
     form.appendChild(field("Position", selectInput(POSITIONS, draft.pos, v => draft.pos = v)));
+    form.appendChild(field("Archetype", textInput(draft.archetype, v => draft.archetype = v)));
     form.appendChild(field("Jersey Number", numInput(draft.jerseyNumber, v => draft.jerseyNumber = clamp(Math.round(v), 0, 99), { min: 0, max: 99 })));
     form.appendChild(field("Age", numInput(draft.age, v => draft.age = Math.round(v), { min: 18, max: 45 })));
+    form.appendChild(field("Morale", selectInput(MORALE_LEVELS, draft.morale, v => draft.morale = v)));
     form.appendChild(field("Draft Season", el("div", { class: "muted", style: "padding-top:8px" }, p.draftSeason ? `Season ${p.draftSeason}` : "UDFA")));
     form.appendChild(field("Draft Pick", el("div", { class: "muted", style: "padding-top:8px" }, p.draftPick ? `#${p.draftPick} overall` : "UDFA")));
     if (team) form.appendChild(field("Team", el("div", { class: "muted", style: "padding-top:8px" }, teamName(team.id))));
     return form;
   }
+
   function skillsTab() {
     const wrap = el("div");
     wrap.appendChild(el("div", { class: "stat-grid", style: "margin-bottom:14px" }, [statBox(draft.ovr, "Overall"), statBox(draft.pot, "Potential")]));
+    wrap.appendChild(el("p", { class: "field-label", style: "margin-bottom:6px" }, "Physical"));
     const form = el("div", { class: "form-grid" });
     form.appendChild(field("Overall (OVR)", numInputWithBounds(draft.ovr, v => { draft.ovr = clamp(Math.round(v), 0, 99); renderBody(); }, { min: 0, max: 99 })));
     form.appendChild(field("Potential (POT)", numInputWithBounds(draft.pot, v => { draft.pot = clamp(Math.round(v), 0, 99); renderBody(); }, { min: 0, max: 99 })));
@@ -1770,9 +1886,57 @@ function showEditPlayerModal(p, onSave, opts = {}) {
     form.appendChild(field("Agility", numInputWithBounds(draft.agility, v => draft.agility = clamp(Math.round(v), 40, 99), { min: 40, max: 99 })));
     form.appendChild(field("Injury Prone (1=durable, 5=fragile)", numInputWithBounds(draft.injuryProne, v => draft.injuryProne = clamp(Math.round(v), 1, 5), { min: 1, max: 5 })));
     wrap.appendChild(form);
-    wrap.appendChild(el("p", { class: "muted", style: "margin-top:12px" }, "Overall and Potential drive the simulation directly. Height/Weight/Speed/Strength/Agility are descriptive for now — Injury Prone is the one sub-attribute that actually affects how often this player gets hurt. Min/Max jump straight to each stat's floor or ceiling."));
+
+    wrap.appendChild(el("p", { class: "field-label", style: "margin:16px 0 6px" }, "Mental"));
+    const mform = el("div", { class: "form-grid" });
+    [["intelligence", "Intelligence"], ["vision", "Vision"], ["decisions", "Decisions"], ["discipline", "Discipline"]].forEach(([k, l]) => {
+      mform.appendChild(field(l, numInputWithBounds(draft.mental[k], v => draft.mental[k] = clamp(Math.round(v), 40, 99), { min: 40, max: 99 })));
+    });
+    wrap.appendChild(mform);
+    wrap.appendChild(el("p", { class: "muted", style: "margin-top:12px" }, "Overall and Potential drive the simulation directly. Everything else on this tab is descriptive for now — except Injury Prone, which does affect how often this player gets hurt."));
     return wrap;
   }
+
+  function developTab() {
+    const wrap = el("div");
+    const panel1 = el("div", { class: "panel" }, [el("h3", {}, "Rating Progression")]);
+    if (p.seasonLog.length) {
+      const chart = el("div", { style: "display:flex; align-items:flex-end; gap:8px; height:110px; padding-top:16px;" });
+      p.seasonLog.slice(-8).forEach(log => {
+        const ovr = log.ovr ?? 0;
+        const h = clamp(((ovr - 40) / (99 - 40)) * 90, 4, 90);
+        chart.appendChild(el("div", { style: "flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;" }, [
+          el("div", { class: "muted", style: "font-size:0.7rem" }, String(ovr)),
+          el("div", { style: `width:100%; background:var(--blue); border-radius:3px 3px 0 0; height:${h}px;` }),
+          el("div", { class: "muted", style: "font-size:0.65rem" }, `S${log.season}`),
+        ]));
+      });
+      panel1.appendChild(chart);
+    } else panel1.appendChild(el("p", { class: "muted" }, "No completed seasons yet."));
+    wrap.appendChild(panel1);
+
+    const panel2 = el("div", { class: "panel" }, [
+      el("h3", {}, "Estimated Potential (Scouts)"),
+      el("p", { style: "font-family:var(--font-display); font-weight:700; font-size:1.1rem;" }, potentialLabel(draft.pot)),
+    ]);
+    wrap.appendChild(panel2);
+
+    wrap.appendChild(el("p", { class: "field-label", style: "margin-bottom:6px" }, "Development Factors"));
+    const dform = el("div", { class: "form-grid" });
+    [["coaching", "Coaching"], ["teamMentors", "Team Mentors"], ["personality", "Personality"]].forEach(([k, l]) => {
+      dform.appendChild(field(l, numInputWithBounds(draft.devFactors[k], v => draft.devFactors[k] = clamp(Math.round(v), 1, 5), { min: 1, max: 5 })));
+    });
+    wrap.appendChild(dform);
+
+    const injPanel = el("div", { class: "panel", style: "margin-top:16px" }, [el("h3", {}, "Injury History")]);
+    if (!p.injuryHistory.length) injPanel.appendChild(el("p", { class: "muted" }, "No injuries on record."));
+    p.injuryHistory.slice().reverse().forEach(inj => {
+      injPanel.appendChild(el("div", { class: "list-row" }, [el("span", {}, `Season ${inj.season}, Week ${inj.week}`), el("span", { class: "muted" }, `Out ${inj.weeksOut} wk${inj.weeksOut > 1 ? "s" : ""}`)]));
+    });
+    wrap.appendChild(injPanel);
+    return wrap;
+  }
+
   function contractTab() {
     const wrap = el("div");
     if (isProspect) {
@@ -1783,6 +1947,15 @@ function showEditPlayerModal(p, onSave, opts = {}) {
       wrap.appendChild(el("p", { class: "muted", style: "margin-top:10px" }, "This is the range shown to you on draft day — it's separate from the player's true (hidden) Overall on the Skills tab."));
       return wrap;
     }
+
+    wrap.appendChild(el("p", { class: "field-label", style: "margin-bottom:6px" }, "Character"));
+    const cform = el("div", { class: "form-grid" });
+    [["greed", "Greed"], ["loyalty", "Loyalty"], ["ambition", "Ambition"], ["personality", "Personality"], ["workEthic", "Work Ethic"]].forEach(([k, l]) => {
+      cform.appendChild(field(l, selectInput(CHARACTER_LEVELS, draft.character[k], v => draft.character[k] = v)));
+    });
+    wrap.appendChild(cform);
+
+    wrap.appendChild(el("p", { class: "field-label", style: "margin:16px 0 6px" }, "Contract"));
     const form = el("div", { class: "form-grid" });
     form.appendChild(field("Salary ($M/yr avg)", numInput(draft.salary, v => draft.salary = Math.max(0, v), { min: 0, step: 0.1 })));
     form.appendChild(field("Signing Bonus ($M total)", numInput(draft.bonus, v => draft.bonus = Math.max(0, v), { min: 0, step: 0.1 })));
@@ -1800,6 +1973,11 @@ function showEditPlayerModal(p, onSave, opts = {}) {
     wrap.appendChild(table);
 
     if (team) {
+      const tradeRow = el("div", { class: "row-gap", style: "margin-top:14px; align-items:center;" }, [
+        el("span", { class: "field-label" }, "Trade Block"),
+        el("button", { class: `chip ${draft.tradeBlock ? "active" : ""}`, onclick: () => { draft.tradeBlock = !draft.tradeBlock; renderBody(); } }, draft.tradeBlock ? "Available" : "Not Available"),
+      ]);
+      wrap.appendChild(tradeRow);
       wrap.appendChild(el("div", { style: "margin-top:16px" }, [
         el("button", { class: "btn btn-danger", onclick: () => {
           if (confirmish(`Release ${p.name}? This ends the contract and cuts them from ${teamName(team.id)}.`)) {
@@ -1811,6 +1989,71 @@ function showEditPlayerModal(p, onSave, opts = {}) {
     return wrap;
   }
 
+  function gamesTab() {
+    const wrap = el("div");
+    const chips = el("div", { class: "chip-row" });
+    chips.appendChild(el("button", { class: `chip ${gamesTab._mode !== "career" ? "active" : ""}`, onclick: () => { gamesTab._mode = "season"; renderBody(); } }, "This Season"));
+    chips.appendChild(el("button", { class: `chip ${gamesTab._mode === "career" ? "active" : ""}`, onclick: () => { gamesTab._mode = "career"; renderBody(); } }, "Career"));
+    wrap.appendChild(chips);
+
+    const rows = gamesTab._mode === "career" ? p.gameLog : p.gameLog.filter(g => g.season === S.season);
+    const panel = el("div", { class: "panel" });
+    if (!rows.length) {
+      const msg = team && team.id !== S.userTeamId
+        ? "Detailed game-by-game logs are only tracked for your own roster (to keep save files a reasonable size). This player's season and career totals are still tracked normally."
+        : "No games played yet.";
+      panel.appendChild(el("div", { class: "empty-state" }, msg));
+      wrap.appendChild(panel); return wrap;
+    }
+    const table = el("table");
+    const headCols = gamesTab._mode === "career" ? ["Szn", "Wk", "Opp", "Stat line"] : ["Wk", "Opp", "Stat line"];
+    table.appendChild(el("tr", {}, headCols.map(h => el("th", { class: h === "Szn" || h === "Wk" ? "num" : "" }, h))));
+    const tbody = el("tbody");
+    rows.slice().reverse().forEach(g => {
+      const cells = [];
+      if (gamesTab._mode === "career") cells.push(el("td", { class: "num" }, String(g.season)));
+      cells.push(el("td", { class: "num" }, String(g.week)));
+      cells.push(el("td", {}, `${g.home ? "vs" : "@"} ${teamName(g.opp)}`));
+      cells.push(el("td", { class: "muted" }, statLine(g.stats, p.pos)));
+      tbody.appendChild(el("tr", {}, cells));
+    });
+    table.appendChild(tbody);
+    panel.appendChild(table);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+
+  function careerTab() {
+    const wrap = el("div");
+    wrap.appendChild(el("div", { class: "stat-grid", style: "margin-bottom:14px" }, [
+      statBox(p.awards.rings, "Rings"), statBox(p.awards.poty, "POTY"), statBox(p.awards.allPro, "All-Pro"), statBox(p.awards.confBowlApps, "Conf Bowl"),
+    ]));
+    const statsPanel = el("div", { class: "panel" }, [el("h3", {}, "Career Stats"), el("div", { class: "stat-grid" }, [
+      statBox(p.career.gp, "Games"), statBox(String(playerValue(p) | 0), "Value Score"),
+    ]), el("p", { class: "muted", style: "margin-top:10px" }, statLine(p.career, p.pos))]);
+    wrap.appendChild(statsPanel);
+
+    const draftPanel = el("div", { class: "panel" }, [el("h3", {}, "Draft Info"), el("div", { class: "stat-grid" }, [
+      statBox(team ? teamName(team.id).split(" ").pop() : "—", "Picked By"),
+      statBox(p.draftPick ? `#${p.draftPick}` : "UDFA", "Pick"),
+      statBox(p.draftSeason || "—", "Year"),
+      statBox(p.college, "College"),
+    ])]);
+    wrap.appendChild(draftPanel);
+
+    const score = careerScore(p.career);
+    const pct = clamp(Math.round((score / HOF_THRESHOLD) * 100), 0, 100);
+    const hofPanel = el("div", { class: "panel" }, [
+      el("h3", {}, "Hall of Fame Progress"),
+      el("div", { style: "background:var(--paper-2); border-radius:20px; height:10px; overflow:hidden; margin:8px 0;" }, [
+        el("div", { style: `background:var(--blue); height:100%; width:${pct}%;` }),
+      ]),
+      el("p", { class: "muted" }, `${pct}% of the way to an elite career (score ${Math.round(score)} / ${HOF_THRESHOLD}).`),
+    ]);
+    wrap.appendChild(hofPanel);
+    return wrap;
+  }
+
   renderTabs(); renderBody();
   node.appendChild(tabsRow); node.appendChild(body);
   node.appendChild(el("div", { class: "row-gap", style: "margin-top:14px" }, [
@@ -1818,11 +2061,16 @@ function showEditPlayerModal(p, onSave, opts = {}) {
       const newName = `${draft.firstName} ${draft.lastName}`.trim() || p.name;
       Object.assign(p, {
         name: newName, pos: draft.pos, college: draft.college, jerseyNumber: draft.jerseyNumber, age: draft.age,
+        archetype: draft.archetype, morale: draft.morale,
         ovr: draft.ovr, pot: draft.pot, heightIn: draft.heightIn, weightLb: draft.weightLb,
         speed: draft.speed, strength: draft.strength, agility: draft.agility, injuryProne: draft.injuryProne,
+        mental: draft.mental,
       });
       if (isProspect) { p._scoutLow = draft.scoutLow; p._scoutHigh = draft.scoutHigh; }
-      else { p.salary = draft.salary; p.bonus = draft.bonus; p.contractYears = draft.contractYears; p.weightContract = draft.weightContract; p.salaryOverride = true; }
+      else {
+        p.salary = draft.salary; p.bonus = draft.bonus; p.contractYears = draft.contractYears; p.weightContract = draft.weightContract; p.salaryOverride = true;
+        p.character = draft.character; p.devFactors = draft.devFactors; p.tradeBlock = draft.tradeBlock;
+      }
       addLog(`Edited ${isProspect ? "prospect" : "player"} ${p.name}.`); saveGame(); closeModal(); onSave();
     } }, "Save Changes"),
     el("button", { class: "btn btn-ghost", onclick: closeModal }, "Cancel"),
