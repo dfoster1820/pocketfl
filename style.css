@@ -1,21 +1,21 @@
 /* ===================== Tokens ===================== */
 :root{
-  --ink:      #E9EDF1;
-  --ink-soft: #93A0AC;
-  --page:     #0B0F13;
-  --paper:    #171C22;
-  --paper-2:  #1F2630;
-  --blue:     #1E7FC2;
-  --blue-dk:  #113A55;
-  --blue-lt:  #4AAAE6;
-  --gold:     #C99A3D;
-  --gold-lt:  #E4C171;
-  --brick:    #D1594A;
-  --green:    #3BAA6E;
-  --light:    #F2F5F8;
+  --ink:      #F0F0F0;
+  --ink-soft: #9A9A9A;
+  --page:     #0A0A0A;
+  --paper:    #161616;
+  --paper-2:  #212121;
+  --blue:     #C41230;
+  --blue-dk:  #4A0E1D;
+  --blue-lt:  #E8354F;
+  --gold:     #C9C9C9;
+  --gold-lt:  #E8E8E8;
+  --brick:    #8B2635;
+  --green:    #F0F0F0;
+  --light:    #F5F5F5;
   --line:     rgba(255,255,255,0.12);
   --line-soft:rgba(255,255,255,0.07);
-  --shadow:   0 10px 30px rgba(0,0,0,0.45);
+  --shadow:   0 10px 30px rgba(0,0,0,0.6);
 
   --font-display: "Archivo Expanded", Georgia, serif;
   --font-body: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -34,7 +34,7 @@ body{
 .hidden{ display:none !important; }
 button{ font-family:inherit; cursor:pointer; }
 input, select{ font-family:inherit; }
-select, input[type="text"], input[type="number"]{
+select, input[type="text"], input[type="number"], input[type="password"]{
   background: var(--paper-2); color: var(--ink); border:1px solid var(--line);
   border-radius:4px; padding:9px 11px; width:100%;
 }
@@ -48,10 +48,10 @@ select, input[type="text"], input[type="number"]{
 .btn:active{ transform: translateY(1px); }
 .btn-primary{ background: var(--blue); color: var(--light); }
 .btn-primary:hover{ background: var(--blue-lt); }
-.btn-primary:disabled{ background:#3A4550; color:#8A97A3; cursor:not-allowed; }
+.btn-primary:disabled{ background:#333333; color:#8A8A8A; cursor:not-allowed; }
 .btn-ghost{ background:transparent; color: var(--blue-lt); border:1.5px solid var(--blue); }
 .btn-ghost:hover{ background: var(--blue); color:var(--light); }
-.btn-gold{ background: var(--gold); color: #241B08; }
+.btn-gold{ background: var(--gold); color: #161616; }
 .btn-gold:hover{ background: var(--gold-lt); }
 .btn-danger{ background:transparent; color:var(--brick); border:1.5px solid var(--brick); }
 .btn-danger:hover{ background:var(--brick); color:var(--light); }
@@ -66,8 +66,8 @@ select, input[type="text"], input[type="number"]{
 /* ===================== New Game Screen ===================== */
 #screen-newgame{
   min-height:100vh; background:
-    radial-gradient(1200px 500px at 20% -10%, rgba(201,154,61,0.14), transparent 60%),
-    linear-gradient(180deg, var(--blue-dk), #0d1620 65%);
+    radial-gradient(1200px 500px at 20% -10%, rgba(196,18,48,0.16), transparent 60%),
+    linear-gradient(180deg, var(--blue-dk), #0a0a0a 65%);
   display:flex; align-items:center; justify-content:center; padding:40px 18px;
 }
 .newgame-wrap{ width:100%; max-width:480px; }
@@ -75,9 +75,9 @@ select, input[type="text"], input[type="number"]{
 .brand-mark{
   display:inline-flex; align-items:center; justify-content:center;
   width:56px; height:56px; border-radius:50%; border:2px solid var(--gold);
-  font-family:var(--font-display); font-weight:800; color:var(--gold); font-size:1.1rem;
-  margin-bottom:14px;
+  margin-bottom:14px; background: rgba(255,255,255,0.03);
 }
+.brand-mark svg{ width:32px; height:32px; }
 .brand h1{ font-family:var(--font-display); font-weight:800; font-size:2rem; margin:0 0 6px; color:var(--light); }
 .tagline{ margin:0; color: rgba(242,245,248,0.7); font-size:0.95rem; }
 
@@ -99,7 +99,7 @@ select, input[type="text"], input[type="number"]{
 .team-opt .t-conf{ font-size:0.65rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.05em; }
 .team-opt .t-city{ font-size:0.72rem; color:var(--ink-soft); }
 .team-opt .t-name{ font-family:var(--font-display); font-weight:700; font-size:0.95rem; }
-.team-opt.selected{ border-color: var(--blue-lt); background:rgba(74,170,230,0.14); box-shadow: inset 0 0 0 1px var(--blue-lt); }
+.team-opt.selected{ border-color: var(--blue-lt); background:rgba(232,53,79,0.14); box-shadow: inset 0 0 0 1px var(--blue-lt); }
 
 /* ===================== Main App Shell ===================== */
 #screen-main{ min-height:100vh; display:flex; flex-direction:column; }
@@ -164,17 +164,17 @@ tbody tr:hover{ background: rgba(255,255,255,0.035); }
 }
 .tag-out{
   font-family:var(--font-mono); font-size:0.66rem; font-weight:700; padding:1px 6px;
-  border-radius:3px; background: rgba(209,89,74,0.18); color: var(--brick); margin-left:6px;
+  border-radius:3px; background: rgba(139,38,53,0.22); color: #E8929B; margin-left:6px;
 }
 .ovr{ font-family:var(--font-mono); font-weight:700; }
-.ovr-elite{ color:var(--gold-lt); }
-.ovr-good{ color:var(--blue-lt); }
+.ovr-elite{ color:var(--blue-lt); }
+.ovr-good{ color:var(--gold-lt); }
 .ovr-avg{ color:var(--ink-soft); }
-.ovr-low{ color:#E08B7C; }
+.ovr-low{ color:var(--brick); }
 
 .pill{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:0.72rem; font-weight:700; font-family:var(--font-mono); }
-.pill-win{ background:rgba(59,170,110,0.18); color:#6FD79B; }
-.pill-loss{ background:rgba(209,89,74,0.18); color:#E08B7C; }
+.pill-win{ background:rgba(255,255,255,0.10); color:#F0F0F0; }
+.pill-loss{ background:rgba(139,38,53,0.22); color:#E8929B; }
 .pill-tie{ background:rgba(255,255,255,0.08); color:var(--ink-soft); }
 
 .empty-state{ text-align:center; padding: 30px 10px; color:var(--ink-soft); }
@@ -198,7 +198,7 @@ tbody tr:hover{ background: rgba(255,255,255,0.035); }
   border:1.5px solid var(--line); border-radius:5px; padding:12px 14px; margin-bottom:8px;
   display:flex; align-items:center; gap:14px; background:var(--paper-2); flex-wrap:wrap;
 }
-.draft-card.on-clock{ border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,154,61,0.25); }
+.draft-card.on-clock{ border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,201,201,0.25); }
 
 /* Staff / stars */
 .staff-card{

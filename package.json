@@ -1,7 +1,7 @@
 {
-  "name": "gridiron-office",
+  "name": "pocketfl",
   "version": "1.0.0",
-  "description": "A from-scratch football GM sim: roster, draft, free agency, trades, and simulated seasons. Vanilla HTML/CSS/JS, no build step.",
+  "description": "PocketFL — a from-scratch football GM sim: roster, draft, free agency, trades, cloud sync, and simulated seasons. Vanilla HTML/CSS/JS, no build step.",
   "scripts": {
     "test": "node test/smoke.js"
   },

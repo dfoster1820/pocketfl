@@ -175,6 +175,7 @@ function freshState() {
     teamSeasonHistory: [],
     lastWeekAwards: null,
     log: [],
+    updatedAt: Date.now(),
   };
 }
 
@@ -204,10 +205,76 @@ function migrateSettings(s) {
 }
 
 function saveGame() {
+  S.updatedAt = Date.now();
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* export/import still works */ }
+  scheduleCloudPush();
 }
 function loadSavedState() {
   try { const raw = localStorage.getItem(SAVE_KEY); return raw ? migrateSettings(JSON.parse(raw)) : null; } catch (e) { return null; }
+}
+
+/* ------------------------------ Cloud Sync (GitHub Gist) ----------------------- */
+/* Saves live in localStorage by default (per browser, per device). To make the
+   same URL show the same franchise on every device, we optionally mirror the
+   save to a GitHub Gist via the REST API, using a personal access token the
+   player provides. The token/Gist ID are connection config, NOT game data —
+   kept in a separate localStorage key so they never end up in an Export Save
+   file or get overwritten by migrateSettings(). */
+
+const CLOUD_KEY = "gridiron_cloud_v1";
+const CLOUD_FILENAME = "gridiron-office-save.json";
+let cloudStatus = { state: "idle", message: "" }; // idle | syncing | ok | error
+let cloudPushTimer = null;
+
+function loadCloudConfig() {
+  try { const raw = localStorage.getItem(CLOUD_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+}
+function saveCloudConfig(cfg) { try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ } }
+function clearCloudConfig() { try { localStorage.removeItem(CLOUD_KEY); } catch (e) { /* ignore */ } }
+function cloudConfigured() { const c = loadCloudConfig(); return !!(c && c.token && c.gistId); }
+
+function ghHeaders(token) {
+  return { "Authorization": `token ${token}`, "Accept": "application/vnd.github+json", "Content-Type": "application/json" };
+}
+
+async function cloudCreate(token) {
+  const body = { description: "PocketFL save (auto-managed — do not delete the JSON key)", public: false, files: { [CLOUD_FILENAME]: { content: JSON.stringify(S) } } };
+  const res = await fetch("https://api.github.com/gists", { method: "POST", headers: ghHeaders(token), body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`GitHub rejected the request (${res.status}). Check the token has the "gist" scope.`);
+  const data = await res.json();
+  saveCloudConfig({ token, gistId: data.id });
+  return data.id;
+}
+
+async function cloudPull(token, gistId) {
+  const res = await fetch(`https://api.github.com/gists/${gistId}`, { headers: ghHeaders(token) });
+  if (!res.ok) throw new Error(`Could not read that Gist (${res.status}). Check the token and Gist ID.`);
+  const data = await res.json();
+  const file = data.files && data.files[CLOUD_FILENAME];
+  if (!file) throw new Error(`That Gist doesn't contain a ${CLOUD_FILENAME} file.`);
+  const content = file.truncated ? await (await fetch(file.raw_url)).text() : file.content;
+  return JSON.parse(content);
+}
+
+async function cloudPush(token, gistId, stateObj) {
+  const body = { files: { [CLOUD_FILENAME]: { content: JSON.stringify(stateObj) } } };
+  const res = await fetch(`https://api.github.com/gists/${gistId}`, { method: "PATCH", headers: ghHeaders(token), body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Sync failed (${res.status}).`);
+  return true;
+}
+
+function scheduleCloudPush() {
+  if (!cloudConfigured() || !S) return;
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => {
+    const cfg = loadCloudConfig();
+    if (!cfg) return;
+    cloudStatus = { state: "syncing", message: "Syncing…" };
+    if (activeView === "settings") renderSettings();
+    cloudPush(cfg.token, cfg.gistId, S)
+      .then(() => { cloudStatus = { state: "ok", message: `Synced ${new Date().toLocaleTimeString()}` }; if (activeView === "settings") renderSettings(); })
+      .catch(err => { cloudStatus = { state: "error", message: err.message }; if (activeView === "settings") renderSettings(); });
+  }, 3000);
 }
 
 /* --------------------------- League Generation ----------------------------- */
@@ -1569,7 +1636,7 @@ function renderDraft(root) {
         list.appendChild(el("div", { class: "draft-card on-clock" }, [
           el("span", { class: "pos-badge" }, p.pos),
           el("div", { style: "flex:1" }, [
-            el("div", { style: "font-weight:700" }, [p.name, p._gem ? el("span", { class: "tag-out", style: "background:rgba(201,154,61,0.2); color:var(--gold-lt)" }, "SCOUTS LOVE HIM") : null]),
+            el("div", { style: "font-weight:700" }, [p.name, p._gem ? el("span", { class: "tag-out", style: "background:rgba(201,201,201,0.2); color:var(--gold-lt)" }, "SCOUTS LOVE HIM") : null]),
             el("div", { class: "muted" }, `Age ${p.age} · Scouted ${p._scoutLow}-${p._scoutHigh} · Grade ${grade((p._scoutLow + p._scoutHigh) / 2 + p.pot * 0.15)}`),
           ]),
           el("div", { class: "row-gap" }, [
@@ -1673,10 +1740,75 @@ function renderSettings() {
   const root = $("#view-settings");
   root.innerHTML = "";
   root.appendChild(el("h2", { class: "section-title" }, "Settings"));
-  root.appendChild(subTabs([["difficulty", "Difficulty"], ["editplayers", "Edit Players"], ["editstaff", "Edit Staff"]], settingsSubTab, (k) => { settingsSubTab = k; renderSettings(); }));
+  root.appendChild(subTabs([["difficulty", "Difficulty"], ["editplayers", "Edit Players"], ["editstaff", "Edit Staff"], ["cloud", "Cloud Sync"]], settingsSubTab, (k) => { settingsSubTab = k; renderSettings(); }));
   if (settingsSubTab === "difficulty") renderSettingsDifficulty(root);
   else if (settingsSubTab === "editplayers") renderEditPlayers(root);
-  else renderEditStaffScreen(root);
+  else if (settingsSubTab === "editstaff") renderEditStaffScreen(root);
+  else renderCloudSync(root);
+}
+function renderCloudSync(root) {
+  const cfg = loadCloudConfig();
+  root.appendChild(el("p", { class: "section-sub" }, "Mirror your save to a private GitHub Gist so the same franchise shows up on every device that opens this URL."));
+
+  const warnPanel = el("div", { class: "panel" }, [el("h3", {}, "Before you connect")]);
+  warnPanel.appendChild(el("p", { class: "muted" }, "You'll need a GitHub personal access token. Create one at github.com → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token. Check only the \"gist\" box — nothing else — then copy the token."));
+  warnPanel.appendChild(el("p", { class: "muted" }, "The token is stored only in this browser's local storage (never in your Export Save file). A \"secret\" Gist isn't truly private — anyone with the exact Gist ID/URL could view your save — but it's unlisted and won't contain anything sensitive beyond your franchise data."));
+  root.appendChild(warnPanel);
+
+  if (!cfg) {
+    const setupPanel = el("div", { class: "panel" }, [el("h3", {}, "Connect")]);
+    const tokenInput = el("input", { type: "password", placeholder: "GitHub personal access token (gist scope)" });
+    const gistInput = el("input", { type: "text", placeholder: "Existing Gist ID (only needed to join a save from another device)" });
+    setupPanel.appendChild(field("Personal Access Token", tokenInput));
+    setupPanel.appendChild(el("div", { style: "height:10px" }));
+    setupPanel.appendChild(field("Gist ID (optional)", gistInput));
+    const statusLine = el("p", { class: "muted", style: "margin-top:10px" }, "");
+    setupPanel.appendChild(statusLine);
+    setupPanel.appendChild(el("div", { class: "row-gap", style: "margin-top:10px" }, [
+      el("button", { class: "btn btn-primary", onclick: async () => {
+        const token = tokenInput.value.trim(); if (!token) { statusLine.textContent = "Enter a token first."; return; }
+        statusLine.textContent = "Creating cloud save…";
+        try { const id = await cloudCreate(token); statusLine.textContent = `Connected! Gist ID: ${id}`; renderSettings(); }
+        catch (e) { statusLine.textContent = e.message; }
+      } }, "Create New Cloud Save"),
+      el("button", { class: "btn btn-ghost", onclick: async () => {
+        const token = tokenInput.value.trim(); const gistId = gistInput.value.trim();
+        if (!token || !gistId) { statusLine.textContent = "Enter both the token and the Gist ID from your other device."; return; }
+        statusLine.textContent = "Connecting…";
+        try {
+          const remote = await cloudPull(token, gistId);
+          saveCloudConfig({ token, gistId });
+          if (confirmish("Load the franchise from that Gist now? (Cancel keeps what's on this device and will overwrite the cloud save on next sync.)")) {
+            S = migrateSettings(remote); saveGame(); enterMainApp();
+          } else { renderSettings(); }
+        } catch (e) { statusLine.textContent = e.message; }
+      } }, "Connect to Existing"),
+    ]));
+    root.appendChild(setupPanel);
+    return;
+  }
+
+  const statePanel = el("div", { class: "panel" }, [el("h3", {}, "Connected")]);
+  statePanel.appendChild(el("div", { class: "stat-grid" }, [
+    statBox(cfg.gistId, "Gist ID"),
+    statBox(cloudStatus.state === "idle" ? "Ready" : cloudStatus.message, "Status"),
+  ]));
+  statePanel.appendChild(el("p", { class: "muted", style: "margin-top:10px" }, `View it at gist.github.com/${cfg.gistId} — copy this Gist ID plus your token to any other device's Cloud Sync screen and tap "Connect to Existing" to link the same save.`));
+  statePanel.appendChild(el("div", { class: "row-gap", style: "margin-top:12px" }, [
+    el("button", { class: "btn btn-primary", onclick: async () => {
+      cloudStatus = { state: "syncing", message: "Syncing…" }; renderSettings();
+      try { await cloudPush(cfg.token, cfg.gistId, S); cloudStatus = { state: "ok", message: `Synced ${new Date().toLocaleTimeString()}` }; }
+      catch (e) { cloudStatus = { state: "error", message: e.message }; }
+      renderSettings();
+    } }, "Sync Now"),
+    el("button", { class: "btn btn-ghost", onclick: async () => {
+      if (!confirmish("Pull the cloud save and replace what's on this device?")) return;
+      try { const remote = await cloudPull(cfg.token, cfg.gistId); S = migrateSettings(remote); saveGame(); enterMainApp(); }
+      catch (e) { cloudStatus = { state: "error", message: e.message }; renderSettings(); }
+    } }, "Pull Latest"),
+    el("button", { class: "btn btn-danger", onclick: () => { if (confirmish("Disconnect cloud sync on this device? Your Gist itself is not deleted.")) { clearCloudConfig(); renderSettings(); } } }, "Disconnect"),
+  ]));
+  root.appendChild(statePanel);
 }
 function renderSettingsDifficulty(root) {
   root.appendChild(el("p", { class: "section-sub" }, "Difficulty affects injuries and scouting accuracy. Caps and roster size are yours to set."));
@@ -1823,7 +1955,31 @@ function initApp() {
     S = existing;
     $("#continue-card").classList.remove("hidden");
     $("#continue-summary").textContent = `${teamName(S.userTeamId)} · Season ${S.season} · ${S.phase}`;
+    if (cloudConfigured()) {
+      const cfg = loadCloudConfig();
+      cloudPull(cfg.token, cfg.gistId).then(remote => {
+        if (remote && (remote.updatedAt || 0) > (S.updatedAt || 0) + 5000) {
+          const note = $("#cloud-newer-note");
+          note.innerHTML = "";
+          note.appendChild(el("p", { class: "muted", style: "margin-top:10px" }, `A newer cloud save was found (${new Date(remote.updatedAt).toLocaleString()}).`));
+          note.appendChild(el("button", { class: "btn btn-ghost btn-sm", onclick: () => { S = migrateSettings(remote); saveGame(); enterMainApp(); } }, "Load Cloud Version Instead"));
+        }
+      }).catch(() => { /* silent — local save still works fine offline */ });
+    }
   }
+
+  $("#btn-cloud-load").addEventListener("click", async () => {
+    const token = $("#cloud-load-token").value.trim();
+    const gistId = $("#cloud-load-gist").value.trim();
+    const status = $("#cloud-load-status");
+    if (!token || !gistId) { status.textContent = "Enter both the token and the Gist ID."; return; }
+    status.textContent = "Loading…";
+    try {
+      const remote = await cloudPull(token, gistId);
+      saveCloudConfig({ token, gistId });
+      S = migrateSettings(remote); saveGame(); enterMainApp();
+    } catch (e) { status.textContent = e.message; }
+  });
 
   $("#btn-start").addEventListener("click", (e) => {
     const teamId = e.target.dataset.teamId; if (!teamId) return;
@@ -1856,3 +2012,4 @@ document.addEventListener("DOMContentLoaded", initApp);
 
 // Debug/test accessor — top-level `let S` is not a window property in browsers.
 window.__debugState = () => S;
+window.__loadState = (obj) => { S = migrateSettings(obj); saveGame(); return S; };

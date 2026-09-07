@@ -1,4 +1,4 @@
-# Gridiron Office
+# PocketFL
 
 A from-scratch football GM sim in the spirit of Pocket GM 3: draft prospects, hire
 front-office staff, sign and cut players, make trades, and simulate a season week
@@ -120,10 +120,19 @@ icon.
   limits, not just on/off), and the 53-man roster limit.
 - **News** — a wire of front-office events plus a generated "social" feed
   reacting to last week's scoring plays (all fictional handles/players).
-- **Save** — autosaves to the browser's local storage after every action,
-  plus explicit **Export Save** (downloads a JSON file) and **Import Save**
-  buttons (both now in Settings) so a franchise can move between devices or
-  survive a cleared browser cache.
+- **Cloud Sync** (Settings → Cloud Sync) — makes the *same franchise* show
+  up on every device that opens your URL, using a private GitHub Gist as
+  the shared storage. One device creates the cloud save and gets a Gist
+  ID; any other device enters the same personal access token + that Gist
+  ID to join it. After that, playing on either device pushes automatically
+  (a few seconds after each action, batched so it doesn't spam GitHub's
+  API), and opening the app anywhere will offer to load a newer cloud save
+  if one exists. See the security note in the Cloud Sync screen itself —
+  the token lives only in that browser's local storage, and a "secret"
+  Gist is unlisted, not encrypted.
+- **Save** — autosaves to the browser's local storage after every action
+  (works fully offline, no cloud setup required), plus explicit **Export
+  Save** (downloads a JSON file) and **Import Save** buttons in Settings.
 
 ## Project structure
 
