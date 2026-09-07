@@ -110,12 +110,28 @@ icon.
 - **Draft** — 3 rounds, 96 picks total, order set by reverse standings. CPU
   teams draft by best player available adjusted for roster need; you get a
   scouted range (not the exact rating), sized by your scout's accuracy.
+- **Draft picks are real, tradeable assets** — every team's picks exist up
+  to 5 years out (current season + 4), and who's actually on the clock in
+  a given round is resolved through *current ownership*, not the original
+  team — trade away next year's 1st-rounder and whoever you traded it to
+  will pick in that slot. League → Draft shows your full draft-pick
+  capital when no draft is active; the horizon rolls forward automatically
+  each season, and a season's picks drop out of the tradeable pool once
+  that draft happens.
 - **Free agency** — sign released/expired players against a **player salary
   cap** you set yourself (Settings → Difficulty), on or off. Cap accounting
   now includes prorated signing bonus, not just base salary.
-- **Trade desk** — offer any of your players for any of another team's; the
-  CPU accepts or rejects based on a simple value formula (rating, age,
-  potential). Blocked if it would push you over the roster limit.
+- **Trade desk** — offer any of your players *and/or draft picks* for any
+  of another team's; the CPU accepts or rejects based on a simple value
+  formula (rating/age/potential for players, round and years-out for
+  picks). Blocked if it would push you over the roster limit.
+- **Live game viewer** — simulating your week's game (or the Champions
+  Bowl) doesn't just dump a final score and a full recap — it opens at
+  0-0 and reveals the play-by-play in real time, roughly one scoring
+  play/turnover every half second, with the score and quarter updating
+  live as it goes. "Skip to Final" jumps straight to the end if you don't
+  want to wait. Rewatching an old game from the Schedule still shows the
+  instant final recap, since that one already happened.
 - **53-man roster limit** — toggle on/off in Settings. When on, free-agent
   signings and trades that would push you over 53 are blocked; the roster
   screen flags it clearly if a mandatory draft pick ever puts you over.
@@ -186,9 +202,22 @@ saves/loads with schema migration, renders every screen and sub-tab
 15 full seasons end-to-end to confirm Hall of Fame induction stays rare
 and elite (not everyone gets in).
 
+Two more focused test files cover the newest features:
+`test/draft-picks.js` generates the 5-year pick horizon, trades a future
+pick and confirms ownership actually transfers, force-trades a current-year
+pick and confirms the draft order resolves through the new owner (not the
+original team), confirms picks are consumed after their draft and the
+horizon rolls forward each season, and checks the Trade Desk and League →
+Draft screens render picks correctly. `test/live-game.js` drives the live
+game viewer — confirms it opens at 0-0 with an in-progress indicator
+(not the final score), that "Skip to Final" reveals every play and lands
+on the exact simulated score, and that closing early cleans up its timer.
+
 ```bash
 npm install
-npm test
+npm test                    # main suite
+node test/draft-picks.js    # draft pick trading
+node test/live-game.js      # live game viewer
 ```
 
 ## Where to take it next

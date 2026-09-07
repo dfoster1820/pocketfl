@@ -190,6 +190,7 @@ function freshState() {
     teams: [], players: {}, freeAgents: [],
     schedule: [], playoffs: null,
     draft: null,
+    draftPicks: [],
     settings: {
       difficulty: "Medium", injuryLikelihood: "Low", scoutAccuracy: "Medium",
       playerCapOn: true, playerCapLimit: 220,
@@ -210,6 +211,8 @@ function migrateSettings(s) {
   s.settings = Object.assign({}, d, s.settings || {});
   if (s.hallOfFame === undefined) s.hallOfFame = [];
   if (s.teamSeasonHistory === undefined) s.teamSeasonHistory = [];
+  if (s.draftPicks === undefined) s.draftPicks = [];
+  ensureDraftPicksExist(s);
   Object.values(s.players || {}).forEach(p => {
     if (!p.stats || typeof p.stats.yards === "number") p.stats = freshStats(); // old shape -> reset
     if (!p.career) p.career = freshStats();
@@ -454,10 +457,37 @@ function newFranchise(userTeamId) {
   }));
   S.teams.forEach(t => { t.players = buildRoster(t.id); });
   generateSchedule();
+  ensureDraftPicksExist(S);
   S.phase = "preseason";
   S.week = 0;
   addLog(`Franchise founded. You take over the ${teamName(userTeamId)}.`);
   saveGame();
+}
+
+/* ------------------------------ Draft Picks (tradeable, 5-year horizon) -------- */
+
+function ensureDraftPicksExist(state) {
+  if (!state.draftPicks) state.draftPicks = [];
+  const targetMax = state.season + 4;
+  for (let yr = state.season; yr <= targetMax; yr++) {
+    if (!state.draftPicks.some(p => p.season === yr)) {
+      for (let round = 1; round <= 3; round++) {
+        state.teams.forEach(t => {
+          state.draftPicks.push({ id: uid("pick"), season: yr, round, originalTeamId: t.id, ownerTeamId: t.id });
+        });
+      }
+    }
+  }
+}
+function pickValue(pick) {
+  const base = { 1: 32, 2: 16, 3: 8 }[pick.round] || 5;
+  const yearsOut = Math.max(0, pick.season - S.season);
+  return base * Math.pow(0.85, yearsOut);
+}
+function ownedPicks(teamId) { return S.draftPicks.filter(p => p.ownerTeamId === teamId).sort((a, b) => a.season - b.season || a.round - b.round); }
+function pickLabel(pick) {
+  const original = pick.originalTeamId !== pick.ownerTeamId ? ` (via ${teamName(pick.originalTeamId)})` : "";
+  return `${pick.season} Round ${pick.round}${original}`;
 }
 
 function teamName(teamId) {
@@ -686,7 +716,7 @@ function simulateGame(homeTeam, awayTeam) {
         }
       }
       if (onOffenseIsHome) homeScore += 7; else awayScore += 7;
-      log.push({ q: quarter, text: `TD — ${scorer ? scorer.name : "Offense"} (${off.name}) ${yards}-yd ${kind} score` });
+      log.push({ q: quarter, text: `TD — ${scorer ? scorer.name : "Offense"} (${off.name}) ${yards}-yd ${kind} score`, teamId: off.id, points: 7 });
       const k = kOf(off);
       if (k) { k.stats.kicking.xpa += 1; if (Math.random() < 0.94) k.stats.kicking.xpm += 1; }
     } else if (roll < tdProb + fgAttemptProb) {
@@ -697,8 +727,8 @@ function simulateGame(homeTeam, awayTeam) {
         k.stats.kicking.fga += 1;
         if (made) { k.stats.kicking.fgm += 1; k.stats.kicking.long = Math.max(k.stats.kicking.long, dist); }
       }
-      if (made) { if (onOffenseIsHome) homeScore += 3; else awayScore += 3; log.push({ q: quarter, text: `FG — ${k ? k.name : "Kicker"} (${off.name}) good from ${dist}` }); }
-      else log.push({ q: quarter, text: `FG — ${k ? k.name : "Kicker"} (${off.name}) missed from ${dist}` });
+      if (made) { if (onOffenseIsHome) homeScore += 3; else awayScore += 3; log.push({ q: quarter, text: `FG — ${k ? k.name : "Kicker"} (${off.name}) good from ${dist}`, teamId: off.id, points: 3 }); }
+      else log.push({ q: quarter, text: `FG — ${k ? k.name : "Kicker"} (${off.name}) missed from ${dist}`, teamId: off.id, points: 0 });
     } else if (roll < tdProb + fgAttemptProb + toProb) {
       if (Math.random() < 0.45) {
         const qb = qbOf(off);
@@ -711,7 +741,7 @@ function simulateGame(homeTeam, awayTeam) {
         const defender = pickDefender(def);
         if (defender) defender.stats.defense.ff += 1;
       }
-      log.push({ q: quarter, text: `Turnover — ${off.name} gives it away` });
+      log.push({ q: quarter, text: `Turnover — ${off.name} gives it away`, teamId: off.id, points: 0 });
     }
     onOffenseIsHome = !onOffenseIsHome;
   }
@@ -987,6 +1017,7 @@ function processOffseason() {
 }
 
 function buildDraftClass() {
+  ensureDraftPicksExist(S);
   const rounds = 3;
   const count = rounds * S.teams.length;
   const prospects = [];
@@ -1004,10 +1035,17 @@ function buildDraftClass() {
     const gem = prospects.map(id => S.players[id]).sort((a, b) => b.ovr - a.ovr)[0];
     if (gem) gem._gem = true;
   }
-  const order = draftOrderFromStandings();
-  const fullOrder = [];
-  for (let r = 0; r < rounds; r++) fullOrder.push(...order);
-  S.draft = { class: prospects, order: fullOrder, pickIndex: 0, rounds, picks: [] };
+  const standingsOrder = draftOrderFromStandings();
+  const picksThisYear = S.draftPicks.filter(p => p.season === S.season);
+  const fullOrder = [], pickRefs = [];
+  for (let round = 1; round <= rounds; round++) {
+    standingsOrder.forEach(originalTeamId => {
+      const pick = picksThisYear.find(p => p.originalTeamId === originalTeamId && p.round === round);
+      fullOrder.push(pick ? pick.ownerTeamId : originalTeamId);
+      pickRefs.push(pick ? pick.id : null);
+    });
+  }
+  S.draft = { class: prospects, order: fullOrder, pickIndex: 0, rounds, picks: [], pickRefs };
 }
 function draftOrderFromStandings() {
   const hasRecord = S.teams.some(t => t.wins + t.losses + t.ties > 0);
@@ -1051,6 +1089,7 @@ function runDraftUntilUserTurn() {
 function finishDraftIfDone() {
   if (S.draft && draftOnClockTeam() === null) {
     S.phase = "offseason";
+    S.draftPicks = S.draftPicks.filter(p => p.season !== S.season);
     cpuFreeAgencyPass();
     saveGame();
     return true;
@@ -1087,6 +1126,7 @@ function cpuFreeAgencyPass() {
 function beginNewSeason() {
   S.season += 1; S.week = 0; S.phase = "preseason"; S.playoffs = null; S.draft = null;
   generateSchedule();
+  ensureDraftPicksExist(S);
   addLog(`Season ${S.season} preseason begins.`);
   saveGame();
 }
@@ -1137,20 +1177,24 @@ function releasePlayer(teamId, playerId) {
 /* ------------------------------ Trades ----------------------------------------- */
 
 function playerValue(p) { return p.ovr * 2 + (99 - p.age) * 0.4 + p.pot * 0.3; }
-function proposeTrade(otherTeamId, offerIds, requestIds) {
+function proposeTrade(otherTeamId, offerIds, requestIds, offerPickIds = [], requestPickIds = []) {
   const user = teamById(S.userTeamId), other = teamById(otherTeamId);
   const userNewCount = user.players.length - offerIds.length + requestIds.length;
   if (S.settings.rosterLimitOn && userNewCount > ROSTER_LIMIT) {
     return { accepted: false, blocked: true, reason: `That trade would put you over the ${ROSTER_LIMIT}-man limit.` };
   }
-  const offerVal = offerIds.reduce((s, id) => s + playerValue(S.players[id]), 0);
-  const reqVal = requestIds.reduce((s, id) => s + playerValue(S.players[id]), 0);
+  const offerPicks = offerPickIds.map(id => S.draftPicks.find(p => p.id === id)).filter(Boolean);
+  const requestPicks = requestPickIds.map(id => S.draftPicks.find(p => p.id === id)).filter(Boolean);
+  const offerVal = offerIds.reduce((s, id) => s + playerValue(S.players[id]), 0) + offerPicks.reduce((s, p) => s + pickValue(p), 0);
+  const reqVal = requestIds.reduce((s, id) => s + playerValue(S.players[id]), 0) + requestPicks.reduce((s, p) => s + pickValue(p), 0);
   const accepted = offerVal >= reqVal * 0.92;
   if (accepted) {
     user.players = user.players.filter(id => !offerIds.includes(id)).concat(requestIds);
     other.players = other.players.filter(id => !requestIds.includes(id)).concat(offerIds);
     offerIds.forEach(id => S.players[id].teamId = otherTeamId);
     requestIds.forEach(id => S.players[id].teamId = S.userTeamId);
+    offerPicks.forEach(p => p.ownerTeamId = otherTeamId);
+    requestPicks.forEach(p => p.ownerTeamId = S.userTeamId);
     trimRosterIfNeeded(other);
     addLog(`Trade completed with ${teamName(otherTeamId)}.`);
     saveGame();
@@ -1186,14 +1230,16 @@ let settingsSubTab = "difficulty";
 let rosterFilter = "ALL";
 let faFilter = "ALL";
 let tradeTargetId = null, tradeOffer = new Set(), tradeRequest = new Set();
+let tradeOfferPicks = new Set(), tradeRequestPicks = new Set();
 let viewingTeamId = null; // for Team screen's team switcher; null = user's team
 let editPlayersTeamId = null, editPlayersMode = "roster"; // roster | prospects
 let editStaffTeamId = null;
 
 function currentViewingTeamId() { return viewingTeamId || S.userTeamId; }
 
+let activeLiveTimer = null;
 function showModal(node) { $("#modal-body").innerHTML = ""; $("#modal-body").appendChild(node); $("#modal-backdrop").classList.remove("hidden"); }
-function closeModal() { $("#modal-backdrop").classList.add("hidden"); }
+function closeModal() { $("#modal-backdrop").classList.add("hidden"); if (activeLiveTimer) { clearInterval(activeLiveTimer); activeLiveTimer = null; } }
 function confirmish(msg) { return window.confirm(msg); }
 function statBox(v, l) { return el("div", { class: "stat-box" }, [el("div", { class: "v" }, String(v)), el("div", { class: "l" }, l)]); }
 function subTabs(items, current, onPick) {
@@ -1289,14 +1335,14 @@ function renderOfficeOverview(root) {
     btnRow.appendChild(el("button", { class: "btn btn-primary", onclick: () => {
       const results = simulateWeek(); renderAll();
       const mine = results.find(g => g.home === team.id || g.away === team.id);
-      if (mine) showGameModal(mine);
+      if (mine) showLiveGameModal(mine);
     } }, `Simulate Week ${S.week}`));
     if (userGame) { const opp = userGame.home === team.id ? userGame.away : userGame.home; actionsPanel.appendChild(el("p", { class: "muted" }, `This week: ${userGame.home === team.id ? "vs" : "@"} ${teamName(opp)}`)); }
     else actionsPanel.appendChild(el("p", { class: "muted" }, "Bye week — no game scheduled."));
   } else if (S.phase === "playoffs") {
     btnRow.appendChild(el("button", { class: "btn btn-primary", onclick: () => {
       simPlayoffRound(); renderAll();
-      if (S.playoffs.championsBowl) showGameModal({ ...S.playoffs.championsBowl }, true);
+      if (S.playoffs.championsBowl) showLiveGameModal({ ...S.playoffs.championsBowl }, true);
       else setActiveView("league");
     } }, nextPlayoffLabel()));
   } else if (S.phase === "champion") {
@@ -1393,6 +1439,59 @@ function showGameModal(g, isChampionship) {
   showModal(node);
 }
 
+function showLiveGameModal(g, isChampionship) {
+  const node = el("div");
+  node.appendChild(el("h2", { class: "section-title" }, isChampionship ? "Champions Bowl — Live" : "Live Game"));
+
+  const homeScoreEl = el("div", { class: "sb-score" }, "0");
+  const awayScoreEl = el("div", { class: "sb-score" }, "0");
+  const statusEl = el("div", { class: "sb-vs" }, "Q1");
+  node.appendChild(el("div", { class: "scoreboard" }, [
+    el("div", { class: "sb-team" }, [el("div", { class: "nm" }, teamName(g.home)), homeScoreEl]),
+    statusEl,
+    el("div", { class: "sb-team" }, [el("div", { class: "nm" }, teamName(g.away)), awayScoreEl]),
+  ]));
+
+  const logEl = el("div", { class: "play-log" });
+  node.appendChild(logEl);
+
+  const skipBtn = el("button", { class: "btn btn-ghost" }, "Skip to Final");
+  const closeBtn = el("button", { class: "btn btn-primary hidden" }, "Close");
+  closeBtn.addEventListener("click", closeModal);
+  node.appendChild(el("div", { class: "row-gap", style: "margin-top:14px" }, [skipBtn, closeBtn]));
+  showModal(node);
+
+  const entries = g.log || [];
+  let idx = 0, homeScore = 0, awayScore = 0, timer = null;
+
+  function revealNext() {
+    if (idx >= entries.length) { finish(); return; }
+    const entry = entries[idx];
+    if (entry.points && entry.teamId) {
+      if (entry.teamId === g.home) homeScore += entry.points; else awayScore += entry.points;
+      homeScoreEl.textContent = String(homeScore);
+      awayScoreEl.textContent = String(awayScore);
+    }
+    statusEl.textContent = `Q${entry.q}`;
+    const row = el("div", { class: "pl-row" }, [el("span", { class: "pl-q" }, `Q${entry.q}`), el("span", {}, entry.text)]);
+    logEl.insertBefore(row, logEl.firstChild);
+    idx++;
+  }
+  function finish() {
+    if (timer) { clearInterval(timer); timer = null; activeLiveTimer = null; }
+    statusEl.textContent = "FINAL";
+    homeScoreEl.textContent = String(g.homeScore);
+    awayScoreEl.textContent = String(g.awayScore);
+    skipBtn.classList.add("hidden");
+    closeBtn.classList.remove("hidden");
+    if (isChampionship) node.appendChild(el("p", {}, `🏆 ${teamName(g.winner)} are champions.`));
+    if (!entries.length) logEl.appendChild(el("p", { class: "muted" }, "A defensive struggle — no major scoring plays logged."));
+  }
+  skipBtn.addEventListener("click", () => { while (idx < entries.length) revealNext(); finish(); });
+  if (!entries.length) { finish(); }
+  else { timer = setInterval(revealNext, 450); activeLiveTimer = timer; }
+}
+
 /* ---- TEAM ---- */
 function renderTeam() {
   const root = $("#view-team");
@@ -1430,7 +1529,7 @@ function renderRoster(root, teamId) {
 
   const players = team.players.map(id => S.players[id]).filter(p => rosterFilter === "ALL" || p.pos === rosterFilter).sort((a, b) => b.ovr - a.ovr);
   const panel = el("div", { class: "panel" });
-  const table = el("table");
+  const table = el("table", { class: "table-wide" });
   table.appendChild(el("tr", {}, ["Player", "Pos", "Age", "OVR", "POT", "Stat line", "$M", ""].map(h => el("th", { class: ["Age", "OVR", "POT", "$M"].includes(h) ? "num" : "" }, h))));
   const tbody = el("tbody");
   players.forEach(p => {
@@ -1440,7 +1539,7 @@ function renderRoster(root, teamId) {
       el("td", { class: "num" }, String(p.age)),
       el("td", { class: `num ovr ${ovrClass(p.ovr)}` }, String(p.ovr)),
       el("td", { class: "num" }, String(p.pot)),
-      el("td", { class: "muted" }, statLine(p.stats, p.pos)),
+      el("td", { class: "muted truncate", title: statLine(p.stats, p.pos) }, statLine(p.stats, p.pos)),
       el("td", { class: "num" }, p.salary.toFixed(1)),
       el("td", {}, el("button", { class: "btn btn-ghost btn-sm", onclick: () => showEditPlayerModal(p, () => renderTeam()) }, "Edit")),
     ]));
@@ -1576,7 +1675,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
 
     const panel2 = el("div", { class: "panel" }, [
       el("h3", {}, "Estimated Potential (Scouts)"),
-      el("p", { style: "font-family:var(--font-display); font-weight:700; font-size:1.1rem;" }, potentialLabel(draft.pot)),
+      el("p", { style: "font-family:var(--font-display); font-weight:700; font-size:1.02rem; overflow-wrap:break-word;" }, potentialLabel(draft.pot)),
     ]);
     wrap.appendChild(panel2);
 
@@ -1664,7 +1763,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
       panel.appendChild(el("div", { class: "empty-state" }, msg));
       wrap.appendChild(panel); return wrap;
     }
-    const table = el("table");
+    const table = el("table", { class: "table-wide" });
     const headCols = gamesTab._mode === "career" ? ["Szn", "Wk", "Opp", "Stat line"] : ["Wk", "Opp", "Stat line"];
     table.appendChild(el("tr", {}, headCols.map(h => el("th", { class: h === "Szn" || h === "Wk" ? "num" : "" }, h))));
     const tbody = el("tbody");
@@ -1673,7 +1772,7 @@ function showEditPlayerModal(p, onSave, opts = {}) {
       if (gamesTab._mode === "career") cells.push(el("td", { class: "num" }, String(g.season)));
       cells.push(el("td", { class: "num" }, String(g.week)));
       cells.push(el("td", {}, `${g.home ? "vs" : "@"} ${teamName(g.opp)}`));
-      cells.push(el("td", { class: "muted" }, statLine(g.stats, p.pos)));
+      cells.push(el("td", { class: "muted truncate", title: statLine(g.stats, p.pos) }, statLine(g.stats, p.pos)));
       tbody.appendChild(el("tr", {}, cells));
     });
     table.appendChild(tbody);
@@ -1741,17 +1840,17 @@ function renderTeamStats(root, teamId) {
   const team = teamById(teamId);
   const players = team.players.map(id => S.players[id]).sort((a, b) => b.ovr - a.ovr);
   const panel = el("div", { class: "panel" }, [el("h3", {}, `Season ${S.season} Stats`)]);
-  const table = el("table");
+  const table = el("table", { class: "table-wide" });
   table.appendChild(el("tr", {}, ["Player", "Pos", "GP", "Stat line"].map(h => el("th", { class: h === "GP" ? "num" : "" }, h))));
   const tbody = el("tbody");
-  players.forEach(p => tbody.appendChild(el("tr", {}, [el("td", {}, p.name), el("td", {}, el("span", { class: "pos-badge" }, p.pos)), el("td", { class: "num" }, String(p.stats.gp)), el("td", {}, statLine(p.stats, p.pos))])));
+  players.forEach(p => tbody.appendChild(el("tr", {}, [el("td", {}, p.name), el("td", {}, el("span", { class: "pos-badge" }, p.pos)), el("td", { class: "num" }, String(p.stats.gp)), el("td", { class: "truncate", title: statLine(p.stats, p.pos) }, statLine(p.stats, p.pos))])));
   table.appendChild(tbody); panel.appendChild(table); root.appendChild(panel);
 
   const careerPanel = el("div", { class: "panel" }, [el("h3", {}, "Career Totals (this roster)")]);
-  const ctable = el("table");
+  const ctable = el("table", { class: "table-wide" });
   ctable.appendChild(el("tr", {}, ["Player", "Pos", "GP", "Career line"].map(h => el("th", { class: h === "GP" ? "num" : "" }, h))));
   const cbody = el("tbody");
-  players.forEach(p => cbody.appendChild(el("tr", {}, [el("td", {}, p.name), el("td", {}, el("span", { class: "pos-badge" }, p.pos)), el("td", { class: "num" }, String(p.career.gp)), el("td", {}, statLine(p.career, p.pos))])));
+  players.forEach(p => cbody.appendChild(el("tr", {}, [el("td", {}, p.name), el("td", {}, el("span", { class: "pos-badge" }, p.pos)), el("td", { class: "num" }, String(p.career.gp)), el("td", { class: "truncate", title: statLine(p.career, p.pos) }, statLine(p.career, p.pos))])));
   ctable.appendChild(cbody); careerPanel.appendChild(ctable); root.appendChild(careerPanel);
 }
 
@@ -1808,31 +1907,32 @@ function renderFreeAgency(root) {
 }
 
 function renderTrade(root) {
-  root.appendChild(el("p", { class: "section-sub" }, "Pick a team, then choose players from both sides to swap."));
+  root.appendChild(el("p", { class: "section-sub" }, "Pick a team, then choose players and/or draft picks (up to 5 years out) from both sides to swap."));
   const teamSel = el("select");
   teamSel.appendChild(el("option", { value: "" }, "Choose a team..."));
   S.teams.filter(t => t.id !== S.userTeamId).forEach(t => teamSel.appendChild(el("option", { value: t.id }, teamName(t.id))));
   if (tradeTargetId) teamSel.value = tradeTargetId;
-  teamSel.addEventListener("change", (e) => { tradeTargetId = e.target.value || null; tradeOffer.clear(); tradeRequest.clear(); renderTeam(); });
+  teamSel.addEventListener("change", (e) => { tradeTargetId = e.target.value || null; tradeOffer.clear(); tradeRequest.clear(); tradeOfferPicks.clear(); tradeRequestPicks.clear(); renderTeam(); });
   root.appendChild(el("div", { class: "panel" }, [el("h3", {}, "Trade Partner"), teamSel]));
   if (!tradeTargetId) return;
   const me = teamById(S.userTeamId), them = teamById(tradeTargetId);
   const cols = el("div", { style: "display:grid; grid-template-columns:1fr 1fr; gap:16px;" });
-  cols.appendChild(tradeColumn(`You send (${teamName(me.id)})`, me, tradeOffer));
-  cols.appendChild(tradeColumn(`You get (${teamName(them.id)})`, them, tradeRequest));
+  cols.appendChild(tradeColumn(`You send (${teamName(me.id)})`, me, tradeOffer, tradeOfferPicks));
+  cols.appendChild(tradeColumn(`You get (${teamName(them.id)})`, them, tradeRequest, tradeRequestPicks));
   root.appendChild(cols);
   const actionPanel = el("div", { class: "panel" });
   actionPanel.appendChild(el("button", { class: "btn btn-primary", onclick: () => {
-    if (!tradeOffer.size || !tradeRequest.size) { alert("Select at least one player on each side."); return; }
-    const res = proposeTrade(tradeTargetId, [...tradeOffer], [...tradeRequest]);
+    if (!tradeOffer.size && !tradeOfferPicks.size) { alert("Select at least one player or pick to send."); return; }
+    if (!tradeRequest.size && !tradeRequestPicks.size) { alert("Select at least one player or pick to receive."); return; }
+    const res = proposeTrade(tradeTargetId, [...tradeOffer], [...tradeRequest], [...tradeOfferPicks], [...tradeRequestPicks]);
     if (res.blocked) { alert(res.reason); return; }
     alert(res.accepted ? "Trade accepted!" : `${teamName(tradeTargetId)} rejected the offer (they value their side at ${res.reqVal} vs your ${res.offerVal}).`);
-    if (res.accepted) { tradeOffer.clear(); tradeRequest.clear(); }
+    if (res.accepted) { tradeOffer.clear(); tradeRequest.clear(); tradeOfferPicks.clear(); tradeRequestPicks.clear(); }
     renderTeam();
   } }, "Propose Trade"));
   root.appendChild(actionPanel);
 }
-function tradeColumn(title, team, selectedSet) {
+function tradeColumn(title, team, selectedSet, selectedPickSet) {
   const panel = el("div", { class: "panel" }, [el("h3", {}, title)]);
   team.players.map(id => S.players[id]).sort((a, b) => b.ovr - a.ovr).forEach(p => {
     const row = el("label", { class: "list-row", style: "cursor:pointer" }, [
@@ -1842,6 +1942,18 @@ function tradeColumn(title, team, selectedSet) {
     row.querySelector("input").addEventListener("change", (e) => { if (e.target.checked) selectedSet.add(p.id); else selectedSet.delete(p.id); });
     panel.appendChild(row);
   });
+  const picks = ownedPicks(team.id);
+  if (picks.length) {
+    panel.appendChild(el("p", { class: "field-label", style: "margin:12px 0 4px" }, "Draft Picks"));
+    picks.forEach(pick => {
+      const row = el("label", { class: "list-row", style: "cursor:pointer" }, [
+        el("span", {}, [el("span", { class: "seed-badge" }, `R${pick.round}`), " ", pickLabel(pick)]),
+        el("input", { type: "checkbox", ...(selectedPickSet.has(pick.id) ? { checked: "checked" } : {}) }),
+      ]);
+      row.querySelector("input").addEventListener("change", (e) => { if (e.target.checked) selectedPickSet.add(pick.id); else selectedPickSet.delete(pick.id); });
+      panel.appendChild(row);
+    });
+  }
   return panel;
 }
 
@@ -1915,8 +2027,29 @@ function bracketGameRow(leftText, rightText, winnerId) {
     el("span", { class: winnerId && rightText.includes(teamName(winnerId)) ? "winner" : "" }, rightText),
   ]);
 }
+function renderMyDraftPicks(root) {
+  const picks = ownedPicks(S.userTeamId);
+  const panel = el("div", { class: "panel" }, [el("h3", {}, "Your Draft Picks"), el("p", { class: "muted" }, "Trade these from Team → Trade, up to 5 years out.")]);
+  const bySeason = {};
+  picks.forEach(p => { (bySeason[p.season] = bySeason[p.season] || []).push(p); });
+  Object.keys(bySeason).sort().forEach(season => {
+    panel.appendChild(el("p", { class: "field-label", style: "margin:10px 0 4px" }, `Season ${season}`));
+    bySeason[season].forEach(pick => {
+      panel.appendChild(el("div", { class: "list-row" }, [
+        el("span", {}, [el("span", { class: "seed-badge" }, `R${pick.round}`), " ", pickLabel(pick)]),
+        el("span", { class: "muted" }, `Value ~${pickValue(pick).toFixed(0)}`),
+      ]));
+    });
+  });
+  root.appendChild(panel);
+}
+
 function renderDraft(root) {
-  if (!S.draft) { root.appendChild(el("div", { class: "empty-state" }, "No draft in progress. It opens after the Champions Bowl.")); return; }
+  if (!S.draft) {
+    root.appendChild(el("div", { class: "empty-state" }, "No draft in progress. It opens after the Champions Bowl."));
+    renderMyDraftPicks(root);
+    return;
+  }
   const d = S.draft;
   const onClock = draftOnClockTeam();
   if (!onClock) {
@@ -1960,14 +2093,14 @@ function renderHallOfFame(root) {
   root.appendChild(el("p", { class: "section-sub" }, "Career-stat-based induction — no vote, just the numbers."));
   const panel = el("div", { class: "panel" });
   if (!S.hallOfFame.length) { panel.appendChild(el("div", { class: "empty-state" }, "No inductees yet. Play out some careers.")); root.appendChild(panel); return; }
-  const table = el("table");
+  const table = el("table", { class: "table-wide" });
   table.appendChild(el("tr", {}, ["Player", "Pos", "Inducted", "Score", "Career line"].map(h => el("th", { class: h === "Score" || h === "Inducted" ? "num" : "" }, h))));
   const tbody = el("tbody");
   S.hallOfFame.slice().sort((a, b) => b.score - a.score).forEach(h => {
     tbody.appendChild(el("tr", {}, [
       el("td", {}, h.name), el("td", {}, el("span", { class: "pos-badge" }, h.pos)),
       el("td", { class: "num" }, `S${h.inductedSeason}`), el("td", { class: "num ovr ovr-elite" }, String(h.score)),
-      el("td", {}, statLine(h.career, h.pos)),
+      el("td", { class: "truncate", title: statLine(h.career, h.pos) }, statLine(h.career, h.pos)),
     ]));
   });
   table.appendChild(tbody); panel.appendChild(table); root.appendChild(panel);
@@ -2181,7 +2314,7 @@ function renderEditPlayers(root) {
   } else {
     if (!S.draft) { root.appendChild(el("div", { class: "empty-state" }, "No active draft class — starts after the Champions Bowl.")); return; }
     const panel = el("div", { class: "panel" });
-    const table = el("table");
+    const table = el("table", { class: "table-wide" });
     table.appendChild(el("tr", {}, ["Prospect", "Pos", "Age", "Scouted", ""].map(h => el("th", { class: h === "Age" ? "num" : "" }, h))));
     const tbody = el("tbody");
     S.draft.class.map(id => S.players[id]).forEach(p => {

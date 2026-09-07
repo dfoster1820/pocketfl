@@ -132,18 +132,23 @@ select, input[type="text"], input[type="number"], input[type="password"]{
 /* ===================== Cards / Tables shared ===================== */
 .panel{
   background: var(--paper); border:1px solid var(--line-soft); border-radius:6px;
-  padding:18px 20px; margin-bottom:18px;
+  padding:18px 20px; margin-bottom:18px; overflow-x:auto; -webkit-overflow-scrolling:touch;
 }
 .panel h3{ font-family:var(--font-display); font-size:1.05rem; margin:0 0 12px; color:var(--ink); }
 .section-title{ font-family:var(--font-display); font-weight:800; font-size:1.5rem; margin: 0 0 4px; color:var(--ink); }
 .section-sub{ color:var(--ink-soft); font-size:0.9rem; margin:0 0 20px; }
 
-.stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
-.stat-box{ background: rgba(255,255,255,0.045); border-radius:4px; padding:12px 14px; border:1px solid var(--line-soft); }
-.stat-box .v{ font-family:var(--font-mono); font-weight:700; font-size:1.4rem; color:var(--blue-lt); }
-.stat-box .l{ font-size:0.74rem; color:var(--ink-soft); margin-top:2px; }
+.stat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:10px; }
+.stat-box{ background: rgba(255,255,255,0.045); border-radius:4px; padding:11px 13px; border:1px solid var(--line-soft); overflow:hidden; }
+.stat-box .v{
+  font-family:var(--font-display); font-weight:700; color:var(--blue-lt);
+  font-size:clamp(0.92rem, 3.6vw, 1.2rem); line-height:1.2;
+  overflow-wrap:break-word; word-break:break-word; display:block;
+}
+.stat-box .l{ font-size:0.72rem; color:var(--ink-soft); margin-top:3px; }
 
 table{ width:100%; border-collapse:collapse; font-size:0.88rem; }
+.table-wide{ width:auto; min-width:600px; }
 th{
   text-align:left; font-family:var(--font-body); font-weight:600; font-size:0.72rem;
   color: var(--ink-soft); border-bottom:1.5px solid var(--line); padding:6px 8px;
@@ -178,6 +183,8 @@ tbody tr:hover{ background: rgba(255,255,255,0.035); }
 .pill-tie{ background:rgba(255,255,255,0.08); color:var(--ink-soft); }
 
 .empty-state{ text-align:center; padding: 30px 10px; color:var(--ink-soft); }
+.truncate{ display:block; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 860px){ .truncate{ max-width:120px; } }
 
 .list-row{
   display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -263,9 +270,11 @@ tbody tr:hover{ background: rgba(255,255,255,0.035); }
   #content{ padding:16px 14px 30px; }
   .tab-btn{ font-size:0.76rem; padding:12px 6px; min-width:68px; }
   .team-picker{ grid-template-columns:1fr; max-height:300px; }
-  .section-title{ font-size:1.25rem; }
+  .section-title{ font-size:1.2rem; overflow-wrap:break-word; }
   table{ font-size:0.8rem; }
   th, td{ padding:6px 5px; }
   .scoreboard{ gap:10px; }
   .sb-score{ font-size:1.9rem; }
+  .stat-box{ padding:9px 10px; }
+  .stat-grid{ grid-template-columns:repeat(auto-fit,minmax(108px,1fr)); gap:8px; }
 }
