@@ -1,0 +1,12 @@
+{
+  "name": "gridiron-office",
+  "version": "1.0.0",
+  "description": "A from-scratch football GM sim: roster, draft, free agency, trades, and simulated seasons. Vanilla HTML/CSS/JS, no build step.",
+  "scripts": {
+    "test": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  },
+  "license": "MIT"
+}
